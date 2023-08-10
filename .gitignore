@@ -1,0 +1,17 @@
+### IDE
+Thumbs.db
+.DS_Store
+.idea
+.vscode
+*.iml
+*.ipr
+*.iws
+.project
+.settings
+
+### Python
+python/src/kestra.egg-info
+python/dist
+python/build
+python/gradle.properties
+python/README.md
