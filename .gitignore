@@ -15,3 +15,7 @@ python/dist
 python/build
 python/gradle.properties
 python/README.md
+
+
+### Javascript
+javascript/gradle.properties

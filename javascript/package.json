@@ -1,0 +1,24 @@
+{
+  "name": "@kestra-io/libs",
+  "version": "0.0.0",
+  "description": "Kestra is an infinitely scalable orchestration and scheduling platform, creating, running, scheduling, and monitoring millions of complex pipelines.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kestra-io/libs.git"
+  },
+  "keywords": [
+    "workflow",
+    "data",
+    "pipeline",
+    "workflow-engine",
+    "scheduler",
+    "orchestration",
+    "data-pipeline"
+  ],
+  "author": "tchiotludo",
+  "license": "Apache-2.0",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
