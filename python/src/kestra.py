@@ -51,7 +51,7 @@ class Kestra:
             Kestra._metrics(name, "timer", duration, tags)
 
     @staticmethod
-    def execute_flow(serverUrl: str, namespace: str, flow: str, parameter: dict, user: str, password: str):
+    def execute_flow(serverUrl: str, namespace: str, flow: str, parameter: dict, user: str, password: str) -> namedtuple:
         """Method to execute a specific flow on a Kestra server"""
 
         logging.info('Starting flow "' + flow + '" in namespace "' + namespace + '" with parameters ' + str(parameter))
@@ -85,14 +85,18 @@ class Kestra:
                 if "SUCCESS" in response['state']['current']:
                     log = requests.get(
                         serverUrl + Kestra.API_ENDPOINT_EXECUTION_LOG.replace('PARAM_EXECUTION_ID', executionId))
+                    
                     logging.info('Execution of flow ' + flow + ' in Namespace ' + namespace + ' with parameters ' + str(parameter) + ' was successful: \n\n' + str(log.text))
+
                     result.status = response['state']['current']
                     result.log = str(log.text)
                     result.error = None
                     finished = True
                 elif "WARNING" in response['state']['current']:
                     log = requests.get(serverUrl + Kestra.API_ENDPOINT_EXECUTION_LOG.replace('PARAM_EXECUTION_ID', executionId))
+
                     logging.info('Execution of flow ' + flow + ' in Namespace ' + namespace + ' with parameters ' + str(parameter) + ' was successful but with warning: \n\n' + str(log.text))
+
                     result.status = response['state']['current']
                     result.log = str(log.text)
                     result.error = None
@@ -100,7 +104,9 @@ class Kestra:
                 elif "FAILED" in response['state']['current']:
                     log = requests.get(
                         serverUrl + Kestra.API_ENDPOINT_EXECUTION_LOG.replace('PARAM_EXECUTION_ID', executionId))
-                    logging.info('Execution of flow ' + flow + ' in Namespace ' + namespace + ' with parameters ' + parameter + ' failed: \n\n' + str(log.text))
+
+                    logging.info('Execution of flow ' + flow + ' in Namespace ' + namespace + ' with parameters ' + str(parameter) + ' failed: \n\n' + str(log.text))
+                    
                     result.status = response['state']['current']
                     result.log = str(log.text)
                     result.error = None
@@ -108,7 +114,6 @@ class Kestra:
                 time.sleep(1)
 
         except Exception as e:
-            logging.error(f"An error occurred: {e}")
             result.error = e
             result.log = None
             result.status = "ERROR"

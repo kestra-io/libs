@@ -1,0 +1,23 @@
+{
+    "id": "1",
+    "namespace": "staging.process",
+    "flowId": "load-stg_rzbk_liste_00287",
+    "flowRevision": 35,
+    "inputs": {
+        "fileName": "L00287.txt",
+        "reportingDate": "20230331",
+        "stagingTable": "stg_rzbk_liste_00287"
+    },
+    "state": {
+        "current": "CREATED",
+        "histories": [
+            {
+                "state": "CREATED",
+                "date": "2023-08-30T14:50:26.597627700Z"
+            }
+        ],
+        "duration": "PT0.0029998S",
+        "startDate": "2023-08-30T14:50:26.597627700Z"
+    },
+    "originalId": "1uezCjjVXvguTHtIIQyzJs"
+}
