@@ -94,7 +94,7 @@ class Flow:
         os.environ["KESTRA_USER"] = "admin"
         os.environ["KESTRA_PASSWORD"] = "admin"
         flow = Flow()
-        flow.execute("dev", "hello", {"user": "Anna"})
+        flow.execute('mynamespace', 'myflow', {'param': 'value'})
     """
 
     API_ENDPOINT_EXECUTION_CREATE: str = "/api/v1/executions/trigger/PARAM_FLOW_ID"
