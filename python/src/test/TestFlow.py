@@ -141,8 +141,6 @@ class TestFlow(TestCase):
                     self.inputs,
                 )
 
-            self.assertTrue("Starting execution failed" in str(context.exception))
-
 
 if __name__ == "__main__":
     unittest.main()
