@@ -56,31 +56,36 @@ class Kestra:
 
 class Flow:
     """
-    This class allows you to execute a Kestra flow.
+    Execute a Kestra flow and optionally wait for its completion.
 
-    Trigger a flow and wait for completion:
+    Example — trigger a flow and wait for its completion:
         from kestra import Flow
         flow = Flow()
         flow.execute('mynamespace', 'myflow', {'param': 'value'})
 
-    Fire and forget:
+    Example — fire and forget:
         from kestra import Flow
         flow = Flow(wait_for_completion=False)
         flow.execute('mynamespace', 'myflow', {'param': 'value'})
 
-    Overwrite the username and password:
+    Example — overwrite the username and password:
         from kestra import Flow
         flow = Flow()
         flow.user = 'admin'
         flow.password = 'admin'
         flow.execute('mynamespace', 'myflow')
     """
+
     API_ENDPOINT_EXECUTION_CREATE: str = "/api/v1/executions/trigger/PARAM_FLOW_ID"
     API_ENDPOINT_EXECUTION_STATUS: str = "/api/v1/executions/PARAM_EXECUTION_ID"
     API_ENDPOINT_EXECUTION_LOG: str = "/api/v1/logs/PARAM_EXECUTION_ID/download"
 
     def __init__(self, wait_for_completion: bool = True, poll_interval: int = 1):
-        # Get username and password from environment variables, if available
+        """
+        Get username and password from environment variables, if available
+        :param wait_for_completion: whether to wait for the flow to complete
+        :param poll_interval: how often to poll the server for the status of the flow
+        """
         self.wait_for_completion = wait_for_completion
         self.poll_interval = poll_interval
         self.user = os.environ.get("KESTRA_USER", None)
@@ -89,7 +94,7 @@ class Flow:
 
     def _make_request(self, method, url, **kwargs) -> requests.Response:
         """
-        Make a request to the Kestra server, adding authentication if if username and password are set
+        Make a request to the Kestra server, add 'auth' if username and password are set
         :param method: can be 'get', 'post', 'put', 'delete', etc.
         :param url: the URL of your Kestra server e.g. "http://localhost:8080"
         :param kwargs: additional arguments to pass to the request e.g. json, files, etc.
@@ -98,13 +103,11 @@ class Flow:
         if self.user is not None and self.password is not None:
             kwargs["auth"] = (self.user, self.password)
         response = requests.request(method, url, **kwargs)
-        # Check if unauthorized (status code 401)
         if response.status_code == 401:
             raise Exception(
                 "Authentication required but not provided. Please set the username and password."
             )
 
-        # If the response indicates another type of error, raise it
         response.raise_for_status()
         return response
 
@@ -146,6 +149,13 @@ class Flow:
                 raise Exception("Starting execution failed: " + str(response))
 
             execution_id = response["id"]
+            logging.info(
+                "Successfully triggered execution: %s/ui/executions/%s/%s/%s",
+                self.hostname,
+                namespace,
+                flow,
+                execution_id,
+            )
             if self.wait_for_completion:
                 finished = False
                 while not finished:
@@ -223,13 +233,6 @@ class Flow:
                         finished = True
                     time.sleep(self.poll_interval)
             else:
-                logging.info(
-                    "Successfully triggered execution: %s/ui/executions/%s/%s/%s",
-                    self.hostname,
-                    namespace,
-                    flow,
-                    execution_id,
-                )
                 result.status = "STARTED"
                 result.log = None
                 result.error = None
