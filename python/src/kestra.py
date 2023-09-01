@@ -86,7 +86,7 @@ class Flow:
         flow.password = 'admin'
         flow.execute('mynamespace', 'myflow')
 
-    Example — overwrite the hostname, username and password using environment variables:
+    Example — set the hostname, username and password using environment variables:
         from kestra import Flow
         import os
 
