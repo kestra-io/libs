@@ -15,7 +15,7 @@ class TestFlow(TestCase):
         self.hostname = "http://test-kestra"
         self.namespace = "test"
         self.flow = "test"
-        self.parameter = {"testData": "test"}
+        self.inputs = {"testData": "test"}
         self.kestra = Flow()
 
         with open("test/response_failed.json", "r") as response:
@@ -56,7 +56,7 @@ class TestFlow(TestCase):
             result = self.kestra.execute(
                 self.namespace,
                 self.flow,
-                self.parameter,
+                self.inputs,
             )
             self.assertEqual(result.status, "FAILED")
             self.assertEqual(result.log, "Run failed")
@@ -85,7 +85,7 @@ class TestFlow(TestCase):
             result = self.kestra.execute(
                 self.namespace,
                 self.flow,
-                self.parameter,
+                self.inputs,
             )
             self.assertEqual(result.status, "WARNING")
             self.assertEqual(result.log, "Run has warnings")
@@ -114,7 +114,7 @@ class TestFlow(TestCase):
             result = self.kestra.execute(
                 self.namespace,
                 self.flow,
-                self.parameter,
+                self.inputs,
             )
             self.assertEqual(result.status, "SUCCESS")
             self.assertEqual(result.log, "Run was ok")
@@ -138,7 +138,7 @@ class TestFlow(TestCase):
                 self.kestra.execute(
                     self.namespace,
                     self.flow + "_wrong",
-                    self.parameter,
+                    self.inputs,
                 )
 
             self.assertTrue("Starting execution failed" in str(context.exception))

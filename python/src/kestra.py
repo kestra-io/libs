@@ -90,7 +90,9 @@ class Flow:
     API_ENDPOINT_EXECUTION_STATUS: str = "/api/v1/executions/PARAM_EXECUTION_ID"
     API_ENDPOINT_EXECUTION_LOG: str = "/api/v1/logs/PARAM_EXECUTION_ID/download"
 
-    def __init__(self, wait_for_completion: bool = True, poll_interval: int = 1):
+    def __init__(
+        self, wait_for_completion: bool = True, poll_interval: int = 1
+    ) -> None:
         """
         Get username and password from environment variables, if available
         :param wait_for_completion: whether to wait for the flow to complete
@@ -102,7 +104,7 @@ class Flow:
         self.password = os.environ.get("KESTRA_PASSWORD", None)
         self.hostname = os.environ.get("KESTRA_HOSTNAME", "http://localhost:8080")
 
-    def _make_request(self, method, url, **kwargs) -> requests.Response:
+    def _make_request(self, method: str, url: str, **kwargs) -> requests.Response:
         """
         Make a request to the Kestra server, add 'auth' if username and password are set
         :param method: can be 'get', 'post', 'put', 'delete', etc.
@@ -153,31 +155,31 @@ class Flow:
         self,
         namespace: str,
         flow: str,
-        parameter: dict = None,
+        inputs: dict = None,
     ) -> namedtuple:
-        if parameter is None:
-            parameter = {}
+        if inputs is None:
+            inputs = {}
 
         logging.debug(
             "Starting a flow %s in the namespace %s with parameters %s",
             flow,
             namespace,
-            str(parameter),
+            str(inputs),
         )
         result = namedtuple("FlowExecution", ["status", "log", "error"])
         url_default = self.hostname + Flow.API_ENDPOINT_EXECUTION_CREATE.replace(
             "PARAM_FLOW_ID", namespace + "/" + flow
         )
         try:
-            if len(parameter) > 0:
+            if len(inputs) > 0:
                 labels = "?"
-                for key in parameter:
+                for key in inputs:
                     key_ = urllib.parse.quote(key)
-                    value_ = urllib.parse.quote(parameter[key])
+                    value_ = urllib.parse.quote(inputs[key])
                     labels = f"{labels}labels={key_}:{value_}"
 
                 url = url_default + labels
-                response = self._make_request("post", url, files=parameter).json()
+                response = self._make_request("post", url, files=inputs).json()
             else:
                 response = self._make_request("post", url_default).json()
 
@@ -202,7 +204,7 @@ class Flow:
                             "Execution of the flow %s in the namespace %s with parameters %s was successful \n%s",
                             flow,
                             namespace,
-                            str(parameter),
+                            str(inputs),
                             str(log.text),
                         )
                         result.status = response["state"]["current"]
@@ -214,7 +216,7 @@ class Flow:
                             "Execution of the flow %s in the namespace %s with parameters %s finished with warnings \n%s",
                             flow,
                             namespace,
-                            str(parameter),
+                            str(inputs),
                             str(log.text),
                         )
                         result.status = response["state"]["current"]
@@ -226,7 +228,7 @@ class Flow:
                             "Execution of the flow %s in the namespace %s with parameters %s failed \n%s",
                             flow,
                             namespace,
-                            str(parameter),
+                            str(inputs),
                             str(log.text),
                         )
                         result.status = response["state"]["current"]
