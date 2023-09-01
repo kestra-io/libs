@@ -74,6 +74,16 @@ class Flow:
         flow.user = 'admin'
         flow.password = 'admin'
         flow.execute('mynamespace', 'myflow')
+
+    Example — overwrite the hostname, username and password using environment variables:
+        from kestra import Flow
+        import os
+
+        os.environ["KESTRA_HOSTNAME"] = "http://localhost:8080"
+        os.environ["KESTRA_USER"] = "admin"
+        os.environ["KESTRA_PASSWORD"] = "admin"
+        flow = Flow()
+        flow.execute("dev", "hello", {"user": "Anna"})
     """
 
     API_ENDPOINT_EXECUTION_CREATE: str = "/api/v1/executions/trigger/PARAM_FLOW_ID"
@@ -111,6 +121,34 @@ class Flow:
         response.raise_for_status()
         return response
 
+    def check_status(self, execution_id: str) -> requests.Response:
+        """
+        Check the status of the execution
+        :param execution_id: the ID of the execution
+        :return: the response from the server
+        """
+        return self._make_request(
+            "get",
+            self.hostname
+            + Flow.API_ENDPOINT_EXECUTION_STATUS.replace(
+                "PARAM_EXECUTION_ID", execution_id
+            ),
+        )
+
+    def get_logs(self, execution_id: str) -> requests.Response:
+        """
+        Get the execution logs
+        :param execution_id: the ID of the execution
+        :return: the response from the server
+        """
+        return self._make_request(
+            "get",
+            self.hostname
+            + Flow.API_ENDPOINT_EXECUTION_LOG.replace(
+                "PARAM_EXECUTION_ID", execution_id
+            ),
+        )
+
     def execute(
         self,
         namespace: str,
@@ -120,8 +158,8 @@ class Flow:
         if parameter is None:
             parameter = {}
 
-        logging.info(
-            "Starting flow %s in namespace %s with parameters %s",
+        logging.debug(
+            "Starting a flow %s in the namespace %s with parameters %s",
             flow,
             namespace,
             str(parameter),
@@ -139,18 +177,16 @@ class Flow:
                     labels = f"{labels}labels={key_}:{value_}"
 
                 url = url_default + labels
-                response = self._make_request("post", url, files=parameter)
-                response = response.json()
+                response = self._make_request("post", url, files=parameter).json()
             else:
-                response = self._make_request("post", url_default)
-                response = response.json()
+                response = self._make_request("post", url_default).json()
 
             if "id" not in response:
                 raise Exception("Starting execution failed: " + str(response))
 
             execution_id = response["id"]
             logging.info(
-                "Successfully triggered execution: %s/ui/executions/%s/%s/%s",
+                "Successfully triggered the execution: %s/ui/executions/%s/%s/%s",
                 self.hostname,
                 namespace,
                 flow,
@@ -159,74 +195,40 @@ class Flow:
             if self.wait_for_completion:
                 finished = False
                 while not finished:
-                    response = self._make_request(
-                        "get",
-                        self.hostname
-                        + Flow.API_ENDPOINT_EXECUTION_STATUS.replace(
-                            "PARAM_EXECUTION_ID", execution_id
-                        ),
-                    )
-                    response = response.json()
-
+                    response = self.check_status(execution_id).json()
+                    log = self.get_logs(execution_id)
                     if "SUCCESS" in response["state"]["current"]:
-                        log = self._make_request(
-                            "get",
-                            self.hostname
-                            + Flow.API_ENDPOINT_EXECUTION_LOG.replace(
-                                "PARAM_EXECUTION_ID", execution_id
-                            ),
-                        )
-
                         logging.info(
-                            "Execution of flow %s in Namespace %s with parameters %s was successful \n%s",
+                            "Execution of the flow %s in the namespace %s with parameters %s was successful \n%s",
                             flow,
                             namespace,
                             str(parameter),
                             str(log.text),
                         )
-
                         result.status = response["state"]["current"]
                         result.log = str(log.text)
                         result.error = None
                         finished = True
                     elif "WARNING" in response["state"]["current"]:
-                        log = self._make_request(
-                            "get",
-                            self.hostname
-                            + Flow.API_ENDPOINT_EXECUTION_LOG.replace(
-                                "PARAM_EXECUTION_ID", execution_id
-                            ),
-                        )
-
                         logging.info(
-                            "Execution of flow %s in Namespace %s with parameters %s was successful but with warning \n%s",
+                            "Execution of the flow %s in the namespace %s with parameters %s finished with warnings \n%s",
                             flow,
                             namespace,
                             str(parameter),
                             str(log.text),
                         )
-
                         result.status = response["state"]["current"]
                         result.log = str(log.text)
                         result.error = None
                         finished = True
                     elif "FAILED" in response["state"]["current"]:
-                        log = self._make_request(
-                            "get",
-                            self.hostname
-                            + Flow.API_ENDPOINT_EXECUTION_LOG.replace(
-                                "PARAM_EXECUTION_ID", execution_id
-                            ),
-                        )
-
                         logging.info(
-                            "Execution of flow %s in Namespace %s with parameters %s failed \n%s",
+                            "Execution of the flow %s in the namespace %s with parameters %s failed \n%s",
                             flow,
                             namespace,
                             str(parameter),
                             str(log.text),
                         )
-
                         result.status = response["state"]["current"]
                         result.log = str(log.text)
                         result.error = None
