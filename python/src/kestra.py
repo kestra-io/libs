@@ -188,11 +188,12 @@ class Flow:
         )
         if self.labels_from_inputs and len(inputs) > 0:
             if inputs.get("files") is not None:
-                raise Exception(
-                    "Labels from inputs is not supported with inputs of type FILE"
-                )
+                logging.debug("Label(s) for inputs of type FILE will not be set")
             labels = "?"
-            for key in inputs:
+            filtered_inputs = {
+                key: value for key, value in inputs.items() if key != "files"
+            }
+            for key in filtered_inputs:
                 key_ = urllib.parse.quote(key)
                 value_ = urllib.parse.quote(inputs[key])
                 labels = f"{labels}labels={key_}:{value_}"
@@ -247,6 +248,18 @@ class Flow:
                 elif "FAILED" in response["state"]["current"]:
                     logging.info(
                         "Execution of the flow %s in the namespace %s with parameters %s failed \n%s",
+                        flow,
+                        namespace,
+                        str(inputs),
+                        str(log.text),
+                    )
+                    result.status = response["state"]["current"]
+                    result.log = str(log.text)
+                    result.error = None
+                    finished = True
+                elif "KILLED" in response["state"]["current"]:
+                    logging.info(
+                        "Execution of the flow %s in the namespace %s with parameters %s has been killed \n%s",
                         flow,
                         namespace,
                         str(inputs),
