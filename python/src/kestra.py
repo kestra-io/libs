@@ -192,9 +192,10 @@ class Flow:
                 key_ = urllib.parse.quote(key)
                 try:
                     value_ = urllib.parse.quote(inputs[key])
-                    labels = f"{labels}labels={key_}:{value_}"
                 except TypeError:
-                    logging.debug("Label(s) for inputs of type FILE will not be set")
+                    logging.debug("Label(s) for inputs of type FILE will only use the input name")
+                    value_ = urllib.parse.quote(inputs[key][0])
+                labels = f"{labels}&labels={key_}:{value_}"
 
             url = url_default + labels
             response = self._make_request("post", url, files=inputs).json()
