@@ -187,16 +187,14 @@ class Flow:
             "PARAM_FLOW_ID", namespace + "/" + flow
         )
         if self.labels_from_inputs and len(inputs) > 0:
-            if inputs.get("files") is not None:
-                logging.debug("Label(s) for inputs of type FILE will not be set")
             labels = "?"
-            filtered_inputs = {
-                key: value for key, value in inputs.items() if key != "files"
-            }
-            for key in filtered_inputs:
+            for key in inputs:
                 key_ = urllib.parse.quote(key)
-                value_ = urllib.parse.quote(inputs[key])
-                labels = f"{labels}labels={key_}:{value_}"
+                try:
+                    value_ = urllib.parse.quote(inputs[key])
+                    labels = f"{labels}labels={key_}:{value_}"
+                except TypeError:
+                    logging.debug("Label(s) for inputs of type FILE will not be set")
 
             url = url_default + labels
             response = self._make_request("post", url, files=inputs).json()
