@@ -188,9 +188,7 @@ class Flow:
         )
         if self.labels_from_inputs and len(inputs) > 0:
             labels = "?"
-            for key in inputs:
-                value = inputs[key]
-                labels = f"{labels}&labels={key}:{value}"
+            labels = "?" + "&".join([f"labels={key}:{value}" for key, value in inputs.items()])
 
             url = url_default + labels
             response = self._make_request("post", url, files=inputs).json()
