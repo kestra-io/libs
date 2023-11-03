@@ -33,7 +33,7 @@
 <p align="center" style="color:grey;"><i>Get started with Kestra in 4 minutes.</i></p>
 
 
-# Kestra SDKs for Python, Node.js, R, and more
+# Kestra libs 
 
 <p align="center">
   <a href="https://kestra.io">
@@ -41,7 +41,7 @@
   </a>
 </p>
 
-SDKs to interact with Kestra from any programming language. 
+Libraries to interact with metrics and outputs in Kestra script tasks.
 
 ![Kestra orchestrator](https://kestra.io/video.gif)
 
