@@ -97,7 +97,7 @@ class Flow:
         flow.execute('mynamespace', 'myflow', {'param': 'value'})
     """
 
-    API_ENDPOINT_EXECUTION_CREATE: str = "/api/v1/executions/trigger/PARAM_FLOW_ID"
+    API_ENDPOINT_EXECUTION_CREATE: str = "/api/v1/executions/PARAM_FLOW_ID"
     API_ENDPOINT_EXECUTION_STATUS: str = "/api/v1/executions/PARAM_EXECUTION_ID"
     API_ENDPOINT_EXECUTION_LOG: str = "/api/v1/logs/PARAM_EXECUTION_ID/download"
 
