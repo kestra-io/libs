@@ -16,6 +16,7 @@ python/build
 python/gradle.properties
 python/README.md
 python/**/__pycache__
+python/venv
 
 ### Javascript
 javascript/gradle.properties

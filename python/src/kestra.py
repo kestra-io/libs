@@ -1,17 +1,20 @@
 import json
 from datetime import datetime
-import urllib
 import logging
+
 import requests
 import time
 from collections import namedtuple
 import os
-
+import sys
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
+class InfoFilter(logging.Filter):
+    def filter(self, rec):
+        return rec.levelno in (logging.DEBUG, logging.INFO)
 
 class Kestra:
     def __init__(self):
@@ -52,6 +55,52 @@ class Kestra:
             )
         else:
             Kestra._metrics(name, "timer", duration, tags)
+
+    @staticmethod
+    def logger(name=None, level=None):
+        logger = logging.getLogger("Kestra" if level is None else name)
+        logger.setLevel(logging.INFO if level is None else level)
+
+        stdOut = logging.StreamHandler(sys.stdout)
+        stdOut.setLevel(logging.DEBUG)
+        stdOut.addFilter(lambda record: record.levelno <= logging.INFO)
+        stdOut.setFormatter(JsonFormatter())
+
+        stdErr = logging.StreamHandler()
+        stdErr.setLevel(logging.WARNING)
+        stdOut.setFormatter(JsonFormatter())
+
+        logger.addHandler(stdOut)
+        logger.addHandler(stdErr)
+
+        return logger
+
+
+class JsonFormatter(logging.Formatter):
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(message)s")
+
+    @staticmethod
+    def _logger_level(level: int) -> str:
+        if level is logging.DEBUG:
+            return "DEBUG"
+        elif level is logging.INFO:
+            return "INFO"
+        elif level is logging.WARNING:
+            return "WARN"
+        elif level is logging.ERROR or level is logging.CRITICAL or level is logging.FATAL:
+            return "ERROR"
+        else:
+            return "TRACE"
+
+    def format(self, record: logging.LogRecord) -> str:
+        result = {
+            "logs" : {
+                "level:": self._logger_level(record.levelno),
+                "message": self.formatter.format(record),
+            }
+        }
+
+        return "::" + json.dumps(result) + "::"
 
 
 class Flow:
