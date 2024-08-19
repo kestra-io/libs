@@ -1,15 +1,18 @@
-from unittest import TestCase
+import pytest
 import requests_mock
+import os
+
+from setuptools import setup
 
 from kestra import Flow
 
-
-class TestFlow(TestCase):
-    API_ENDPOINT_EXECUTION_CREATE: str = "/api/v1/executions/trigger/test/test"
+class TestFlow:
+    API_ENDPOINT_EXECUTION_CREATE: str = "/api/v1/executions/test/test"
     API_ENDPOINT_EXECUTION_STATUS: str = "/api/v1/executions/1"
     API_ENDPOINT_EXECUTION_LOG: str = "/api/v1/logs/1/download"
+    dir_path = os.path.dirname(os.path.realpath(__file__))
 
-    def setUp(self):
+    def setup_method(self):
         self.user = "test"
         self.password = "test"
         self.hostname = "http://test-kestra"
@@ -18,19 +21,19 @@ class TestFlow(TestCase):
         self.inputs = {"testData": "test"}
         self.kestra = Flow()
 
-        with open("test/response_failed.json", "r") as response:
+        with open(f"{self.dir_path}/response_failed.json", "r") as response:
             self.mockResponseFailed = response.read()
 
-        with open("test/response_warning.json", "r") as response:
+        with open(f"{self.dir_path}/response_warning.json", "r") as response:
             self.mockResponseWarning = response.read()
 
-        with open("test/response_success.json", "r") as response:
+        with open(f"{self.dir_path}/response_success.json", "r") as response:
             self.mockResponseSuccess = response.read()
 
-        with open("test/response_execution_ok.json", "r") as response:
+        with open(f"{self.dir_path}/response_execution_ok.json", "r") as response:
             self.mockResponseExecutionOk = response.read()
 
-        with open("test/response_execution_wrong.json", "r") as response:
+        with open(f"{self.dir_path}/response_execution_wrong.json", "r") as response:
             self.mockResponseExecutionWrong = response.read()
 
     def test_execute_flow_failed(self):
@@ -58,9 +61,9 @@ class TestFlow(TestCase):
                 self.flow,
                 self.inputs,
             )
-            self.assertEqual(result.status, "FAILED")
-            self.assertEqual(result.log, "Run failed")
-            self.assertIsNone(result.error)
+            assert result.status == "FAILED"
+            assert result.log == "Run failed"
+            assert result.error is None
 
     def test_execute_flow_warning(self):
         with requests_mock.Mocker() as m:
@@ -87,9 +90,9 @@ class TestFlow(TestCase):
                 self.flow,
                 self.inputs,
             )
-            self.assertEqual(result.status, "WARNING")
-            self.assertEqual(result.log, "Run has warnings")
-            self.assertIsNone(result.error)
+            assert result.status == "WARNING"
+            assert result.log == "Run has warnings"
+            assert result.error is None
 
     def test_execute_flow_success(self):
         with requests_mock.Mocker() as m:
@@ -116,9 +119,9 @@ class TestFlow(TestCase):
                 self.flow,
                 self.inputs,
             )
-            self.assertEqual(result.status, "SUCCESS")
-            self.assertEqual(result.log, "Run was ok")
-            self.assertIsNone(result.error)
+            assert result.status == "SUCCESS"
+            assert result.log == "Run was ok"
+            assert result.error is None
 
     def test_execute_flow_execution_wrong(self):
         with requests_mock.Mocker() as m:
@@ -134,13 +137,9 @@ class TestFlow(TestCase):
             self.kestra.password = self.password
             self.kestra.hostname = self.hostname
 
-            with self.assertRaises(Exception) as context:
+            with pytest.raises(Exception) as context:
                 self.kestra.execute(
                     self.namespace,
                     self.flow + "_wrong",
                     self.inputs,
                 )
-
-
-if __name__ == "__main__":
-    unittest.main()

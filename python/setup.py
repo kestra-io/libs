@@ -12,7 +12,9 @@ setup(
     package_dir={"": "src"},
     include_package_data=True,
     install_requires=["requests"],
-    tests_require=["requests_mock"],
+    extras_require={
+        'test': ["pytest", "requests_mock"],
+    },
     python_requires=">=3",
     description="Kestra is an infinitely scalable orchestration and scheduling platform, creating, running, scheduling, and monitoring millions of complex pipelines.",
     long_description=(Path(__file__).parent / "README.md").read_text(),
