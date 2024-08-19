@@ -1,6 +1,7 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
+from logging import Logger
 
 import requests
 import time
@@ -8,21 +9,20 @@ from collections import namedtuple
 import os
 import sys
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-class InfoFilter(logging.Filter):
-    def filter(self, rec):
-        return rec.levelno in (logging.DEBUG, logging.INFO)
 
 class Kestra:
+    _logger: Logger = None
+
     def __init__(self):
         pass
 
     @staticmethod
     def _send(map_):
-        print("::" + json.dumps(map_) + "::")
+        print(Kestra.format(map_))
+
+    @staticmethod
+    def format(map_):
+        return "::" + json.dumps(map_) + "::"
 
     @staticmethod
     def _metrics(name, type_, value, tags=None):
@@ -57,27 +57,41 @@ class Kestra:
             Kestra._metrics(name, "timer", duration, tags)
 
     @staticmethod
-    def logger(name=None, level=None):
-        logger = logging.getLogger("Kestra" if level is None else name)
-        logger.setLevel(logging.INFO if level is None else level)
+    def logger():
+        if Kestra._logger is not None:
+            return Kestra._logger
+
+        logger = logging.getLogger("Kestra")
+
+        logger.setLevel(logging.DEBUG)
 
         stdOut = logging.StreamHandler(sys.stdout)
         stdOut.setLevel(logging.DEBUG)
         stdOut.addFilter(lambda record: record.levelno <= logging.INFO)
         stdOut.setFormatter(JsonFormatter())
 
-        stdErr = logging.StreamHandler()
+        stdErr = logging.StreamHandler(sys.stderr)
         stdErr.setLevel(logging.WARNING)
-        stdOut.setFormatter(JsonFormatter())
+        stdErr.setFormatter(JsonFormatter())
 
         logger.addHandler(stdOut)
         logger.addHandler(stdErr)
 
+        Kestra._logger = logger
+
         return logger
 
 
+class LogFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt = None):
+        return datetime \
+            .fromtimestamp(record.created, timezone.utc) \
+            .isoformat(sep="T", timespec="milliseconds") \
+            .replace("+00:00", "Z")
+
+
 class JsonFormatter(logging.Formatter):
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(message)s")
+    _formatter: LogFormatter = LogFormatter("%(asctime)s - %(message)s")
 
     @staticmethod
     def _logger_level(level: int) -> str:
@@ -96,11 +110,11 @@ class JsonFormatter(logging.Formatter):
         result = {
             "logs" : {
                 "level:": self._logger_level(record.levelno),
-                "message": self.formatter.format(record),
+                "message": self._formatter.format(record),
             }
         }
 
-        return "::" + json.dumps(result) + "::"
+        return Kestra.format(result)
 
 
 class Flow:
