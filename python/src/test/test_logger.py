@@ -21,6 +21,6 @@ def test_formatter():
     formatter = JsonFormatter()
     out = formatter.format(make_record())
 
-    assert out.find("::{\"logs\": ") >= 0
+    assert out.find("::{\"logs\": [") >= 0
     assert out.find("1: hello") >= 0
     assert out.find("2020-03-20T14:12:46.000Z") >= 0

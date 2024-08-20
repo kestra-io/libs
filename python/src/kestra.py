@@ -108,10 +108,10 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         result = {
-            "logs" : {
-                "level:": self._logger_level(record.levelno),
+            "logs" : [{
+                "level": self._logger_level(record.levelno),
                 "message": self._formatter.format(record),
-            }
+            }]
         }
 
         return Kestra.format(result)
