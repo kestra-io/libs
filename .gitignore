@@ -20,3 +20,4 @@ python/venv
 
 ### Javascript
 javascript/gradle.properties
+javascript/node_modules/*
