@@ -77,6 +77,10 @@ jobs:
         working-directory: javascript
         run: npm install
 
+      - name: Run unit tests
+        working-directory: javascript
+        run: npm run test
+
       - name: Publish to npm
         working-directory: javascript
         run: npm publish --access public
