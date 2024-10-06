@@ -1,4 +1,4 @@
-import Logger from "./logger.js";
+import Logger from "./logger.es6.js";
 import {jest} from "@jest/globals";
 
 const logger = new Logger();

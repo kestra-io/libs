@@ -1,4 +1,4 @@
-const Kestra = require("./index.js");
+const Kestra = require("./index.cjs");
 
 describe('Logger', () => {
     it.each([
