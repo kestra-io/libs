@@ -1,14 +1,14 @@
 from setuptools import setup
 from pathlib import Path
 import re
+import os
+
+version = os.getenv('VERSION', '0.0.0')
 
 setup(
     name="kestra",
-    version=re.search(
-        "(?m)^version=(.*)$", (Path(__file__).parent / "gradle.properties").read_text()
-    )
-    .group(1)
-    .replace("-SNAPSHOT", ""),
+    version=version
+    .replace("v", ""),
     package_dir={"": "src"},
     include_package_data=True,
     install_requires=["requests"],
