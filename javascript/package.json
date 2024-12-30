@@ -19,8 +19,12 @@
   "license": "Apache-2.0",
   "main": "src/index.js",
   "type": "module",
+  "jest": {
+    "transform": {}
+  },
   "scripts": {
-    "test": "jest"
+    "test": "jest -i index.test.js",
+    "posttest": "node --experimental-vm-modules node_modules/jest/bin/jest.js -i index.es6.test.js"
   },
   "devDependencies": {
     "jest": "^29.7.0"
