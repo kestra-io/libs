@@ -18,6 +18,15 @@ $ npm i
 
 ---
 
+### Build
+
+```bash
+# Builds the source code and bundles it using rollup for distribution to npm
+$ npm run build
+```
+
+---
+
 ### Testing
 
 ```bash
@@ -48,3 +57,5 @@ $ npm unlink @kestra-io/libs
 # Unlink the package globally to remove the symlink
 $ npm unlink --global @kestra-io/libs
 ```
+
+---
