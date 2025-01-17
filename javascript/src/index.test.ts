@@ -1,4 +1,5 @@
-import { Kestra, Logger } from './kestra';
+import Kestra from './kestra/kestra';
+import type { Logger } from './types';
 
 type LogMethod = (...message: any) => void;
 

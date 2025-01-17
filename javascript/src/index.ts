@@ -1,1 +1,3 @@
-export { Kestra as default } from './kestra';
+import Kestra from './kestra/kestra';
+
+export default Kestra;

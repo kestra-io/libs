@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tsPlugin from '@rollup/plugin-typescript';
+import cjsPlugin from '@rollup/plugin-commonjs';
 import terserPlugin from '@rollup/plugin-terser';
 import dtsPlugin from 'rollup-plugin-dts';
 
@@ -23,6 +24,7 @@ export default () => {
       entrypoints,
       outDir: 'dist',
       minify: true,
+      sourceMap: false,
     }),
     createLibBuildConfig({
       format: 'cjs',
@@ -30,6 +32,7 @@ export default () => {
       entrypoints,
       outDir: 'dist',
       minify: true,
+      sourceMap: false,
     }),
     createTypeDeclarationConfig({
       format: 'esm',
@@ -46,44 +49,98 @@ export default () => {
   ];
 };
 
-function createLibBuildConfig({ format, extension, entrypoints, outDir, minify }) {
+function createLibBuildConfig({ format, extension, entrypoints, outDir, minify, sourceMap }) {
+  const isEsm = format === 'esm';
+
   return {
-    input: mapInputFiles(entrypoints),
     plugins: [
       tsPlugin({
         exclude: [...testPatterns],
         compilerOptions: {
-          sourceMap: false,
-          removeComments: true,
-          noEmit: true,
-          emitDeclarationOnly: true,
+          sourceMap,
+          inlineSources: sourceMap,
+          removeComments: !sourceMap,
+          declaration: false,
         },
       }),
+      !isEsm && cjsPlugin(),
       minify &&
         terserPlugin({
           ecma: 2020,
         }),
-    ],
+      transformDefaultExportsPlugin(outDir),
+    ].filter(Boolean),
+    input: mapInputFiles(entrypoints),
     output: {
       format,
       dir: outDir,
-      preserveModules: format === 'esm',
+      preserveModules: isEsm,
+      sourcemap: sourceMap,
+      exports: 'default',
       ...getFilenames(extension),
     },
   };
 }
 
 function createTypeDeclarationConfig({ format, entrypoints, outDir, dtsExtension }) {
+  const isEsm = format === 'esm';
+
   return {
+    plugins: [
+      dtsPlugin({
+        compilerOptions: {
+          sourceMap: true,
+          inlineSources: true,
+          removeComments: false,
+          declaration: true,
+        },
+      }),
+      transformDefaultExportsPlugin(outDir),
+    ],
     input: mapInputFiles(entrypoints),
-    plugins: [dtsPlugin()],
     output: {
       format,
       dir: outDir,
-      generatedCode: 'es2015',
-      ...getFilenames(dtsExtension),
-      preserveModules: true,
+      preserveModules: isEsm,
       preserveModulesRoot: 'src',
+      generatedCode: 'es2015',
+      exports: 'default',
+      ...getFilenames(dtsExtension),
+    },
+  };
+}
+
+function clearDist() {
+  const distPath = join(directoryName, 'dist');
+  if (fs.existsSync(distPath)) {
+    fs.rmSync(distPath, { recursive: true, force: true });
+  }
+}
+
+function transformDefaultExportsPlugin(outDir) {
+  return {
+    name: 'fix-default-exports',
+    writeBundle: (options, bundle) => {
+      for (const [fileName, file] of Object.entries(bundle)) {
+        if (file.type !== 'chunk') {
+          continue;
+        }
+
+        const filePath = join(outDir, fileName);
+        const code = fs.readFileSync(filePath, 'utf-8');
+
+        let transformedCode = '';
+
+        if (fileName.endsWith('.mjs') || fileName.endsWith('.js')) {
+          transformedCode = code.replace(/export\{(\w+) as default\};/g, 'export default $1;');
+        } else if (fileName.endsWith('.d.mts')) {
+          transformedCode = code.replace(/export \{ (\w+) as default \};/g, 'export default $1;');
+        } else if (fileName.endsWith('.d.ts')) {
+          transformedCode = code.replace(/export \{ (\w+) as default \};/g, 'export = $1;');
+        }
+
+        fs.writeFileSync(filePath, transformedCode, 'utf-8');
+      }
     },
   };
 }
@@ -104,11 +161,4 @@ function getFilenames(extension) {
     entryFileNames: `[name].${extension}`,
     chunkFileNames: `_chunk/[name]-[hash].${extension}`,
   };
-}
-
-function clearDist() {
-  const distPath = join(directoryName, 'dist');
-  if (fs.existsSync(distPath)) {
-    fs.rmSync(distPath, { recursive: true, force: true });
-  }
 }
