@@ -73,7 +73,7 @@ jobs:
         working-directory: javascript
         run: |
           curl -s https://raw.githubusercontent.com/kestra-io/kestra/master/README.md > README.md
-          sed -i  's/"version": "0.0.0",/"version": "'$VERSION'",/' package.json
+          npm version "$VERSION" --no-git-tag-version
 
       - name: Install dependencies
         working-directory: javascript
