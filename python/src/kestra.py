@@ -294,7 +294,7 @@ class Flow:
 
         if tenant is not None:
             self.API_ENDPOINT_EXECUTION_CREATE: str = (
-                f"/api/v1/{tenant}/executions/{{flow_id}}"
+                f"/api/v1/{tenant}/executions/{{namespace}}/{{flow_id}}"
             )
             self.API_ENDPOINT_EXECUTION_STATUS: str = (
                 f"/api/v1/{tenant}/executions/{{execution_id}}"
@@ -337,7 +337,14 @@ class Flow:
             requests.Response: The response from the server.
         """
         retries = 5
-        retry_codes = {408, 429, 500, 502, 503, 504}
+        retry_codes = {
+            408,
+            429,
+            500,
+            502,
+            503,
+            504,
+        }
 
         for i in range(retries):
             if self.api_token is not None:
@@ -431,7 +438,8 @@ class Flow:
         result = namedtuple("FlowExecution", ["status", "log", "error"])
 
         url = self.hostname + self.API_ENDPOINT_EXECUTION_CREATE.format(
-            namespace=namespace, flow_id=flow
+            namespace=namespace,
+            flow_id=flow,
         )
 
         if self.labels_from_inputs and len(inputs) > 0:
@@ -462,9 +470,7 @@ class Flow:
         )
 
         if self.wait_for_completion:
-            finished = False
-
-            while not finished:
+            while True:
                 response = self.check_status(execution_id).json()
 
                 log = self.get_logs(execution_id)
@@ -480,7 +486,8 @@ class Flow:
                     result.status = response["state"]["current"]
                     result.log = str(log.text)
                     result.error = None
-                    finished = True
+
+                    return result
                 elif "WARNING" in response["state"]["current"]:
                     logging.warning(
                         "Execution of the flow %s in the namespace %s with parameters %s finished with warnings \n%s",
@@ -492,7 +499,8 @@ class Flow:
                     result.status = response["state"]["current"]
                     result.log = str(log.text)
                     result.error = None
-                    finished = True
+
+                    return result
                 elif "FAILED" in response["state"]["current"]:
                     logging.error(
                         "Execution of the flow %s in the namespace %s with parameters %s failed \n%s",
@@ -504,7 +512,8 @@ class Flow:
                     result.status = response["state"]["current"]
                     result.log = str(log.text)
                     result.error = None
-                    finished = True
+
+                    return result
                 elif "KILLED" in response["state"]["current"]:
                     logging.warning(
                         "Execution of the flow %s in the namespace %s with parameters %s has been killed \n%s",
@@ -516,7 +525,22 @@ class Flow:
                     result.status = response["state"]["current"]
                     result.log = str(log.text)
                     result.error = None
-                    finished = True
+
+                    return result
+                elif "CANCELLED" in response["state"]["current"]:
+                    logging.warning(
+                        "Execution of the flow %s in the namespace %s with parameters %s has been cancelled \n%s",
+                        flow,
+                        namespace,
+                        str(inputs),
+                        str(log.text),
+                    )
+                    result.status = response["state"]["current"]
+                    result.log = str(log.text)
+                    result.error = None
+
+                    return result
+
                 time.sleep(self.poll_interval)
         else:
             result.status = "STARTED"
