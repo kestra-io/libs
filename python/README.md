@@ -1,6 +1,6 @@
 # Kestra Python Client
 
-This Python client provides functionality to interact with the Kestra server for sending metrics, outputs, and logs, as well as executing flows.
+This Python client provides functionality to interact with the Kestra server for sending metrics, outputs, and logs, as well as executing/polling flows.
 
 ## Installation
 
@@ -37,13 +37,30 @@ flow = Flow(
 )
 ```
 
+You can also set the hostname and authentication credentials using environment variables:
+
+```bash
+export KESTRA_HOSTNAME=http://localhost:8080
+export KESTRA_USER=admin
+export KESTRA_PASSWORD=admin
+export KESTRA_API_TOKEN=my_api_token
+```
+
+It is worth noting that the KESTRA_API_TOKEN or KESTRA_USER and KESTRA_PASSWORD need to be used, you do not need all at once. The possible Authentication patterns are:
+
+1. KESTRA_API_TOKEN
+2. KESTRA_USER and KESTRA_PASSWORD
+3. No Authentication (not recommended for production environments)
 
 ### Methods
 
 - **_make_request(method: str, url: str, \*\*kwargs) -> requests.Response**: Makes a request to the Kestra server with optional authentication and retries.
 - **check_status(execution_id: str) -> requests.Response**: Checks the status of an execution.
 - **get_logs(execution_id: str) -> requests.Response**: Retrieves the logs of an execution.
-- **execute(namespace: str, flow: str, inputs: dict = None) -> namedtuple**: Executes a Kestra flow and optionally waits for its completion.
+- **execute(namespace: str, flow: str, inputs: dict = None) -> namedtuple**: Executes a Kestra flow and optionally waits for its completion. The namedtuple returned is a namedtuple with the following properties:
+  - **status**: The status of the execution.
+  - **log**: The log of the execution.
+  - **error**: The error of the execution.
 
 ### Usage Examples
 
@@ -121,7 +138,10 @@ Kestra.logger().info("Hello, world!")
 
 ### Outputs
 
-The `Kestra` class provides a method to send outputs to the Kestra server.
+The `Kestra` class provides a method to send key-value-based outputs to
+the Kestra server. If you want to output large objects, write them to a
+file and specify them within the `outputFiles` property of the Python
+script task.
 
 ```python
 Kestra.outputs({"my_output": "my_value"})
@@ -129,7 +149,7 @@ Kestra.outputs({"my_output": "my_value"})
 
 ### Counters
 
-The `Kestra` class provides a method to send counters to the Kestra server.
+The `Kestra` class provides a method to send counter metrics to the Kestra server.
 
 ```python
 Kestra.counter("my_counter", 1)
@@ -137,7 +157,7 @@ Kestra.counter("my_counter", 1)
 
 ### Timers
 
-The `Kestra` class provides a method to send timers to the Kestra server.
+The `Kestra` class provides a method to send timer metrics to the Kestra server.
 
 ```python
 Kestra.timer("my_timer", 1)
