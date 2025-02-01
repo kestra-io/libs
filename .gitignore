@@ -14,9 +14,9 @@ python/src/kestra.egg-info
 python/dist
 python/build
 python/gradle.properties
-python/README.md
 python/**/__pycache__
 python/venv
+python/.venv
 
 ### Javascript
 javascript/gradle.properties

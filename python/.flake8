@@ -1,0 +1,14 @@
+[flake8]
+ignore =
+    # Enforced by Black: line break before binary operator (W503)
+    W503,
+    # Enforced by Black: line break after binary operator (W504)
+    W504
+exclude =
+    .venv/*
+    dbt/dbt_packages/*
+max-line-length = 88
+max-complexity = 22
+per-file-ignores =
+    # ignore long lines in tests
+    tests/*: E501  
