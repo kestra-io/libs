@@ -30,10 +30,10 @@ The `Flow` class is used to execute a Kestra flow and optionally wait for its co
 
 ```python
 flow = Flow(
-  wait_for_completion=True,
-  poll_interval=1,
-  labels_from_inputs=False,
-  tenant=None
+  wait_for_completion=True, # default is True
+  poll_interval=1, # seconds. default is 1  
+  labels_from_inputs=False, # default is False
+  tenant=None # default is None
 )
 ```
 

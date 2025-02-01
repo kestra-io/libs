@@ -269,9 +269,9 @@ class Flow:
         be used to get the status of an execution and the logs of an execution.
 
         Args:
-            wait_for_completion (bool): Whether to wait for the flow to complete.
-            poll_interval (int): How often to poll the server for the status of the flow.
-            labels_from_inputs (bool): Whether to use the inputs as execution label.
+            wait_for_completion (bool): Whether to wait for the flow to complete. Default is True.
+            poll_interval (int): How often to poll the server for the status of the flow. Default is 1 second.
+            labels_from_inputs (bool): Whether to use the inputs as execution label. Default is False.
             tenant (str): The tenant to use for the request (optional).
 
         Attributes:
