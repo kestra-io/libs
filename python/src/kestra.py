@@ -294,13 +294,13 @@ class Flow:
 
         if tenant is not None:
             self.API_ENDPOINT_EXECUTION_CREATE: str = (
-                "/api/v1/{tenant}/executions/{flow_id}"
+                f"/api/v1/{tenant}/executions/{{flow_id}}"
             )
             self.API_ENDPOINT_EXECUTION_STATUS: str = (
-                "/api/v1/{tenant}/executions/{execution_id}"
+                f"/api/v1/{tenant}/executions/{{execution_id}}"
             )
             self.API_ENDPOINT_EXECUTION_LOG: str = (
-                "/api/v1/{tenant}/logs/{execution_id}/download"
+                f"/api/v1/{tenant}/logs/{{execution_id}}/download"
             )
         else:
             self.API_ENDPOINT_EXECUTION_CREATE: str = (
