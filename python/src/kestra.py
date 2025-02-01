@@ -15,8 +15,8 @@ from exceptions import FailedExponentialBackoff
 
 class Kestra:
     """
-    Kestra Class that is in charge of sending metrics, outputs and logs to the Kestra
-    server.
+    Kestra Class that is in charge of sending metrics, outputs and logs to the
+    Kestra server.
 
     Example - Set a counter:
         Kestra.counter("my_metric", 1)
@@ -89,9 +89,10 @@ class Kestra:
     @staticmethod
     def outputs(map_: dict):
         """
-        The `Kestra` class provides a method to send key-value-based outputs to the Kestra server. 
-        If you want to output large objects, write them to a file and specify them within the 
-        `outputFiles` property of the Python script task.
+        The `Kestra` class provides a method to send key-value-based outputs to
+        the Kestra server. If you want to output large objects, write them to a
+        file and specify them within the `outputFiles` property of the Python
+        script task.
 
         Args:
             map_ (dict): The outputs to send to the Kestra server.
@@ -105,7 +106,8 @@ class Kestra:
         tags: dict | None = None,
     ):
         """
-        The `Kestra` class provides a method to send counter metrics to the Kestra server.
+        The `Kestra` class provides a method to send counter metrics to the Kestra
+        server.
 
         Args:
             name (str): The name of the counter.
@@ -232,7 +234,11 @@ class Flow:
         from kestra import Flow
         flow = Flow()
         with open('example.txt', 'rb') as fh:
-            flow.execute('mynamespace', 'myflow', {'files': ('myfile', fh, 'text/plain')})
+            flow.execute(
+                'mynamespace',
+                'myflow',
+                {'files': ('myfile', fh, 'text/plain')}
+            )
 
     Example — fire and forget:
         from kestra import Flow
@@ -267,25 +273,35 @@ class Flow:
         """
         Initialize the Flow class.
 
-        The Flow class is used to execute a Kestra flow and optionally wait for its completion. It can also
-        be used to get the status of an execution and the logs of an execution.
+        The Flow class is used to execute a Kestra flow and optionally wait for its
+        completion. It can also be used to get the status of an execution and the
+        logs of an execution.
 
         Args:
-            wait_for_completion (bool): Whether to wait for the flow to complete. Default is True.
-            poll_interval (int): How often to poll the server for the status of the flow. Default is 1 second.
-            labels_from_inputs (bool): Whether to use the inputs as execution label. Default is False.
+            wait_for_completion (bool): Whether to wait for the flow to complete.
+                Default is True.
+            poll_interval (int): How often to poll the server for the status of the
+                flow. Default is 1 second.
+            labels_from_inputs (bool): Whether to use the inputs as execution label.
+                Default is False.
             tenant (str): The tenant to use for the request (optional).
 
         Attributes:
             wait_for_completion (bool): Whether to wait for the flow to complete.
-            poll_interval (int): How often to poll the server for the status of the flow.
+            poll_interval (int): How often to poll the server for the status of the
+                flow.
             labels_from_inputs (bool): Whether to use the inputs as execution label.
-            user (str): The username to use for the request. It is retrieved from the KESTRA_USER environment variable.
-            hostname (str): The hostname of the Kestra server. It is retrieved from the KESTRA_HOSTNAME environment variable.
-            api_token (str): The API token to use for the request. It is retrieved from the KESTRA_API_TOKEN environment variable.
+            user (str): The username to use for the request.
+                It is retrieved from the KESTRA_USER environment variable.
+            hostname (str): The hostname of the Kestra server.
+                It is retrieved from the KESTRA_HOSTNAME environment variable.
+            api_token (str): The API token to use for the request.
+                It is retrieved from the KESTRA_API_TOKEN environment variable.
             API_ENDPOINT_EXECUTION_CREATE (str): The endpoint to create an execution.
-            API_ENDPOINT_EXECUTION_STATUS (str): The endpoint to get the status of an execution.
-            API_ENDPOINT_EXECUTION_LOG (str): The endpoint to get the logs of an execution.
+            API_ENDPOINT_EXECUTION_STATUS (str): The endpoint to get the status of an
+                execution.
+            API_ENDPOINT_EXECUTION_LOG (str): The endpoint to get the logs of an
+                execution.
         """
         self.wait_for_completion = wait_for_completion
         self.poll_interval = poll_interval
@@ -317,12 +333,15 @@ class Flow:
 
     def _make_request(self, method: str, url: str, **kwargs) -> requests.Response:
         """
-        Make a request to the Kestra server. Authentication is added in the following order:
+        Make a request to the Kestra server. Authentication is added in the following
+        order:
         1. If an API token is set, it is used.
         2. If username and password are set, they are used.
-        3. If no authentication is set, the request is made without authentication (not recommended).
+        3. If no authentication is set, the request is made without authentication
+            (not recommended).
 
-        The request is retried up to 5 times with an exponential backoff. The retry codes are:
+        The request is retried up to 5 times with an exponential backoff. The retry
+        codes are:
         408: Request timeout
         429: Too many requests
         500: Internal server error
@@ -357,7 +376,8 @@ class Flow:
             response = requests.request(method, url, **kwargs)
             if response.status_code == 401:
                 raise Exception(
-                    "Authentication required but not provided. Please set the username and password."
+                    "Authentication required but not provided. Please set the username "
+                    "and password."
                 )
             elif response.status_code in retry_codes:
                 time.sleep(2**i)
@@ -412,7 +432,8 @@ class Flow:
         The process is the following:
         1. Create the execution
         2. If wait_for_completion is True:
-            - Wait for the execution to finish
+            - Wait for the execution to entered finish state
+                (SUCCESS, WARNING, FAILED, KILLED, CANCELLED)
             - Get the logs of the execution
             - Return the status, log and error of the execution
         3. If wait_for_completion is False:
@@ -458,7 +479,6 @@ class Flow:
 
             for k, v in inputs.items():
                 files[k] = (None, str(v))
-                    
 
             response = self._make_request("post", url, files=files).json()
         else:
@@ -485,7 +505,8 @@ class Flow:
 
                 if "SUCCESS" in response["state"]["current"]:
                     logging.info(
-                        "Execution of the flow %s in the namespace %s with parameters %s was successful \n%s",
+                        "Execution of the flow %s in the namespace %s with parameters "
+                        "%s was successful \n%s",
                         flow,
                         namespace,
                         str(inputs),
@@ -498,7 +519,8 @@ class Flow:
                     return result
                 elif "WARNING" in response["state"]["current"]:
                     logging.warning(
-                        "Execution of the flow %s in the namespace %s with parameters %s finished with warnings \n%s",
+                        "Execution of the flow %s in the namespace %s with parameters "
+                        "%s finished with warnings \n%s",
                         flow,
                         namespace,
                         str(inputs),
@@ -511,7 +533,8 @@ class Flow:
                     return result
                 elif "FAILED" in response["state"]["current"]:
                     logging.error(
-                        "Execution of the flow %s in the namespace %s with parameters %s failed \n%s",
+                        "Execution of the flow %s in the namespace %s with parameters "
+                        "%s failed \n%s",
                         flow,
                         namespace,
                         str(inputs),
@@ -524,7 +547,8 @@ class Flow:
                     return result
                 elif "KILLED" in response["state"]["current"]:
                     logging.warning(
-                        "Execution of the flow %s in the namespace %s with parameters %s has been killed \n%s",
+                        "Execution of the flow %s in the namespace %s with parameters "
+                        "%s has been killed \n%s",
                         flow,
                         namespace,
                         str(inputs),
@@ -537,7 +561,8 @@ class Flow:
                     return result
                 elif "CANCELLED" in response["state"]["current"]:
                     logging.warning(
-                        "Execution of the flow %s in the namespace %s with parameters %s has been cancelled \n%s",
+                        "Execution of the flow %s in the namespace %s with parameters "
+                        "%s has been cancelled \n%s",
                         flow,
                         namespace,
                         str(inputs),

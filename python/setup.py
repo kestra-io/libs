@@ -1,5 +1,4 @@
 import os
-import re
 from pathlib import Path
 
 from setuptools import setup
@@ -14,9 +13,13 @@ setup(
     install_requires=["requests"],
     extras_require={
         "test": ["pytest", "requests_mock"],
+        "dev": ["isort", "black", "flake8"],
     },
     python_requires=">=3",
-    description="Kestra is an infinitely scalable orchestration and scheduling platform, creating, running, scheduling, and monitoring millions of complex pipelines.",
+    description=(
+        "Kestra is an infinitely scalable orchestration and scheduling platform, "
+        "creating, running, scheduling, and monitoring millions of complex pipelines."
+    ),
     long_description=(Path(__file__).parent / "README.md").read_text(),
     long_description_content_type="text/markdown",
     url="https://kestra.io",
