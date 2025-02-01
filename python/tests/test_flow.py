@@ -19,6 +19,7 @@ def test_check_status():
         assert response.status_code == 200
         assert m.call_count == 1
 
+
 def test_get_logs():
     with requests_mock.Mocker() as m:
         m.get(
@@ -33,6 +34,7 @@ def test_get_logs():
 
         assert response.status_code == 200
         assert m.call_count == 1
+
 
 def test_execute_success():
     with requests_mock.Mocker() as m:
@@ -63,6 +65,7 @@ def test_execute_success():
         assert result.error is None
         assert m.call_count == 3
 
+
 def test_execute_failure():
     with requests_mock.Mocker() as m:
         # Mock the execution creation
@@ -92,6 +95,7 @@ def test_execute_failure():
         assert result.error is None
         assert m.call_count == 3
 
+
 def test_execute_fire_and_forget():
     with requests_mock.Mocker() as m:
         # Mock the execution creation
@@ -108,6 +112,7 @@ def test_execute_fire_and_forget():
         assert result.log is None
         assert result.error is None
         assert m.call_count == 1
+
 
 def test_execute_with_inputs():
     with requests_mock.Mocker() as m:
@@ -132,9 +137,7 @@ def test_execute_with_inputs():
 
         flow = Flow(poll_interval=0)
         result = flow.execute(
-            namespace="namespace-test",
-            flow="flow-test",
-            inputs={"param1": "value1"}
+            namespace="namespace-test", flow="flow-test", inputs={"param1": "value1"}
         )
 
         assert result.status == "SUCCESS"
