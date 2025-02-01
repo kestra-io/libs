@@ -12,7 +12,7 @@ setup(
     include_package_data=True,
     install_requires=["requests"],
     extras_require={
-        "test": ["pytest", "requests_mock"],
+        "test": ["pytest", "requests_mock", "pytest-mock"],
         "dev": ["isort", "black", "flake8"],
     },
     python_requires=">=3",

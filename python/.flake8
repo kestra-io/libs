@@ -9,3 +9,6 @@ exclude =
     dbt/dbt_packages/*
 max-line-length = 88
 max-complexity = 22
+per-file-ignores =
+    # ignore long lines in tests
+    tests/*: E501  
