@@ -89,7 +89,9 @@ class Kestra:
     @staticmethod
     def outputs(map_: dict):
         """
-        Send outputs to the Kestra server.
+        The `Kestra` class provides a method to send key-value-based outputs to the Kestra server. 
+        If you want to output large objects, write them to a file and specify them within the 
+        `outputFiles` property of the Python script task.
 
         Args:
             map_ (dict): The outputs to send to the Kestra server.
@@ -103,7 +105,7 @@ class Kestra:
         tags: dict | None = None,
     ):
         """
-        Set a counter to the Kestra server.
+        The `Kestra` class provides a method to send counter metrics to the Kestra server.
 
         Args:
             name (str): The name of the counter.
@@ -119,7 +121,7 @@ class Kestra:
         tags: dict | None = None,
     ):
         """
-        Send a timer to the Kestra server.
+        The `Kestra` class provides a method to send timer metrics to the Kestra server.
 
         Args:
             name (str): The name of the timer.
@@ -452,7 +454,13 @@ class Flow:
 
             response = self._make_request("post", url, files=inputs).json()
         elif len(inputs) > 0:
-            response = self._make_request("post", url, files=inputs).json()
+            files = {}
+
+            for k, v in inputs.items():
+                files[k] = (None, str(v))
+                    
+
+            response = self._make_request("post", url, files=files).json()
         else:
             response = self._make_request("post", url).json()
 
