@@ -27,7 +27,7 @@ jobs:
 
       - name: Install deps
         working-directory: python
-        run: pip install .[test]
+        run: pip install .[test,ion]
 
       - name: Run unit tests
         working-directory: python
