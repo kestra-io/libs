@@ -1,0 +1,2 @@
+{employee_id:100.000000,first_name:"Steven",last_name:"King",email:"SKING",phone_number:"515.123.4567",hire_date:1987-06-17,job_id:"AD_PRES",salary:24000.000000,commission_pct:null,manager_id:null,department_id:90.000000}
+{employee_id:101.000000,first_name:"Neena",last_name:"Kochhar",email:"NKOCHHAR",phone_number:"515.123.4568",hire_date:1989-09-21,job_id:"AD_VP",salary:17000.000000,commission_pct:null,manager_id:100.000000,department_id:90.000000}

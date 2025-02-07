@@ -14,6 +14,7 @@ setup(
     extras_require={
         "test": ["pytest", "requests_mock", "pytest-mock"],
         "dev": ["isort", "black", "flake8"],
+        "ion": ["amazon.ion", "python-dateutil"],
     },
     python_requires=">=3",
     description=(

@@ -14,10 +14,10 @@ The `Kestra` class is responsible for sending metrics, outputs, and logs to the 
 
 ### Methods
 
-- **_send(map_: dict)**: Sends a message to the Kestra server.
-- **format(map_: dict) -> str**: Formats a message to be sent to the Kestra server.
-- **_metrics(name: str, type_: str, value: int, tags: dict | None = None)**: Sends a metric to the Kestra server.
-- **outputs(map_: dict)**: Sends outputs to the Kestra server.
+- **\_send(map\_: dict)**: Sends a message to the Kestra server.
+- **format(map\_: dict) -> str**: Formats a message to be sent to the Kestra server.
+- **\_metrics(name: str, type\_: str, value: int, tags: dict | None = None)**: Sends a metric to the Kestra server.
+- **outputs(map\_: dict)**: Sends outputs to the Kestra server.
 - **counter(name: str, value: int, tags: dict | None = None)**: Sends a counter to the Kestra server.
 - **timer(name: str, duration: int | Callable, tags: dict | None = None)**: Sends a timer to the Kestra server.
 - **logger() -> Logger**: Retrieves the logger for the Kestra server.
@@ -162,3 +162,40 @@ The `Kestra` class provides a method to send timer metrics to the Kestra server.
 ```python
 Kestra.timer("my_timer", 1)
 ```
+
+## Kestra Ion
+
+The `Kestra` ION extra provides a method to read files and convert them to a list of dictionaries.
+
+### Installation
+
+```bash
+pip install kestra[ion]
+```
+### Methods
+
+- **read_ion(path_: str) -> list[dict[str, Any]]**: Reads an Ion file and converts it to a list of dictionaries.
+
+### Usage Example
+
+```python
+import pandas as pd
+import requests
+from kestra_ion import read_ion
+
+file_path = "employees.ion"
+url = "https://huggingface.co/datasets/kestra/datasets/resolve/main/ion/employees.ion"
+response = requests.get(url)
+if response.status_code == 200:
+    with open(file_path, "wb") as file:
+        file.write(response.content)
+else:
+    print(f"Failed to download the file. Status code: {response.status_code}")
+
+
+data = read_ion(file_path)
+df = pd.DataFrame(data)
+print(df.info())
+```
+
+
