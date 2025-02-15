@@ -499,6 +499,8 @@ class Flow:
 
         if self.wait_for_completion:
             while True:
+                time.sleep(self.poll_interval)
+
                 response = self.check_status(execution_id).json()
 
                 log = self.get_logs(execution_id)
@@ -573,8 +575,6 @@ class Flow:
                     result.error = None
 
                     return result
-
-                time.sleep(self.poll_interval)
         else:
             result.status = "STARTED"
             result.log = None
