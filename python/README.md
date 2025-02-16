@@ -174,7 +174,7 @@ pip install kestra[ion]
 ```
 ### Methods
 
-- **read_ion(path_: str) -> list[dict[str, Any]]**: Reads an Ion file and converts it to a list of dictionaries.
+- **read(path_: str) -> list[dict[str, Any]]**: Reads an Ion file and converts it to a list of dictionaries.
 
 ### Usage Example
 
