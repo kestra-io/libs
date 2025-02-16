@@ -3,14 +3,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from kestra_ion import read_ion
+from kestra import Kestra
 
 
 @pytest.fixture
 def load_ion_data():
     def _load_ion_data(file_name):
         file_path = os.path.join(os.path.dirname(__file__), "data", file_name)
-        return read_ion(file_path)
+        return Kestra.read(file_path)
 
     return _load_ion_data
 

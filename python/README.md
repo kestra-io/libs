@@ -181,7 +181,7 @@ pip install kestra[ion]
 ```python
 import pandas as pd
 import requests
-from kestra_ion import read_ion
+from kestra import Kestra
 
 file_path = "employees.ion"
 url = "https://huggingface.co/datasets/kestra/datasets/resolve/main/ion/employees.ion"
@@ -193,7 +193,7 @@ else:
     print(f"Failed to download the file. Status code: {response.status_code}")
 
 
-data = read_ion(file_path)
+data = Kestra.read(file_path)
 df = pd.DataFrame(data)
 print(df.info())
 ```
