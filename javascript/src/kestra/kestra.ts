@@ -11,7 +11,10 @@ const Kestra: KestraFunction = function () {} as KestraFunction;
  * @returns The formatted string.
  */
 Kestra.format = (map: Record<string, any>): string => {
-  return '::' + JSON.stringify(map) + '::';
+  const text: string = JSON.stringify(map).replace(/[\u0085\u2028\u2029]/g, (match: string) => {
+    return '\\u' + match.charCodeAt(0).toString(16).padStart(4, '0');
+  });
+  return '::' + text + '::';
 };
 
 /**
