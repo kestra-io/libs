@@ -4,10 +4,10 @@ import os
 import re
 import sys
 import time
-from collections import namedtuple
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging import Logger
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import amazon.ion.simpleion as ion
 import dateutil.parser
@@ -21,6 +21,14 @@ from amazon.ion.simple_types import (
 )
 
 from exceptions import FailedExponentialBackoff
+
+
+@dataclass(slots=True)
+class FlowExecution:
+    execution_id: str
+    status: Optional[str]
+    log: Optional[str]
+    error: Optional[str]
 
 
 class Kestra:
@@ -500,7 +508,7 @@ class Flow:
         namespace: str,
         flow: str,
         inputs: dict = None,
-    ) -> namedtuple:
+    ) -> FlowExecution:
         """
         Execute a Kestra flow and optionally wait for its completion.
 
@@ -533,8 +541,6 @@ class Flow:
             str(inputs),
         )
 
-        result = namedtuple("FlowExecution", ["status", "log", "error"])
-
         url = self.hostname + self.API_ENDPOINT_EXECUTION_CREATE.format(
             namespace=namespace,
             flow_id=flow,
@@ -563,6 +569,7 @@ class Flow:
             raise Exception("Starting execution failed: " + str(response))
 
         execution_id = response["id"]
+        result = FlowExecution(execution_id, None, None, None)
 
         logging.info(
             "Successfully triggered the execution: %s/ui/executions/%s/%s/%s",
