@@ -10,11 +10,10 @@ setup(
     version=version.replace("v", ""),
     package_dir={"": "src"},
     include_package_data=True,
-    install_requires=["requests"],
+    install_requires=["requests", "amazon.ion", "python-dateutil"],
     extras_require={
         "test": ["pytest", "requests_mock", "pytest-mock"],
         "dev": ["isort", "black", "flake8"],
-        "ion": ["amazon.ion", "python-dateutil"],
     },
     python_requires=">=3",
     description=(
