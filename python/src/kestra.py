@@ -554,12 +554,29 @@ class Flow:
 
             url += labels
 
-            response = self._make_request("post", url, files=inputs).json()
+            files = {}
+
+            # If Tuples are passed, then it should be a File type
+            # for example - ('myfile', fileObject, 'application/json')
+            # If not, then it should be treated as a string
+            for k, v in inputs.items():
+                if isinstance(v, tuple):
+                    files[k] = v
+                else:
+                    files[k] = (None, str(v))
+
+            response = self._make_request("post", url, files=files).json()
         elif len(inputs) > 0:
             files = {}
 
+            # If Tuples are passed, then it should be a File type
+            # for example - ('myfile', fileObject, 'application/json')
+            # If not, then it should be treated as a string
             for k, v in inputs.items():
-                files[k] = (None, str(v))
+                if isinstance(v, tuple):
+                    files[k] = v
+                else:
+                    files[k] = (None, str(v))
 
             response = self._make_request("post", url, files=files).json()
         else:
