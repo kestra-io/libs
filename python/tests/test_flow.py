@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import requests_mock
 from pytest_mock import MockerFixture
@@ -88,6 +90,40 @@ def test_get_logs(tenant):
         response = flow.get_logs(execution_id="123")
 
         assert response.status_code == 200
+        assert m.call_count == 1
+
+
+def test_execute_with_file_input(mocker: MockerFixture):
+    with requests_mock.Mocker() as m:
+        m.post(
+            "http://localhost:8080/api/v1/executions/namespace-test/flow-test",
+            json={"id": "123"},
+            status_code=200,
+        )
+
+        flow = Flow(
+            wait_for_completion=False,
+        )
+
+        result = flow.execute(
+            namespace="namespace-test",
+            flow="flow-test",
+            inputs={
+                "file": (
+                    "myfile",
+                    open(
+                        os.path.join(
+                            os.path.dirname(__file__), "data", "test_input_file.json"
+                        ),
+                        "rb",
+                    ),
+                    "application/json",
+                )
+            },
+        )
+
+        assert result.status == "STARTED"
+        assert result.error is None
         assert m.call_count == 1
 
 
