@@ -22,3 +22,6 @@ python/.venv
 javascript/gradle.properties
 javascript/node_modules/*
 dist/
+
+### Go
+pkg/
