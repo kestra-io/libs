@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import jsonPlugin from '@rollup/plugin-json';
 import tsPlugin from '@rollup/plugin-typescript';
 import cjsPlugin from '@rollup/plugin-commonjs';
 import terserPlugin from '@rollup/plugin-terser';
@@ -54,6 +56,7 @@ function createLibBuildConfig({ format, extension, entrypoints, outDir, minify, 
 
   return {
     plugins: [
+      jsonPlugin(),
       tsPlugin({
         exclude: [...testPatterns],
         compilerOptions: {
@@ -87,6 +90,7 @@ function createTypeDeclarationConfig({ format, entrypoints, outDir, dtsExtension
 
   return {
     plugins: [
+      jsonPlugin(),
       dtsPlugin({
         compilerOptions: {
           sourceMap: true,
