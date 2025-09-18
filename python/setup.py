@@ -26,6 +26,10 @@ setup(
     author="Kestra",
     author_email="hello@kestra.io",
     license="Apache License 2.0",
+    project_urls={
+        "Source": "https://github.com/kestra-io/libs",
+        "Tracker": "https://github.com/kestra-io/libs/issues",
+    },
     platforms="any",
     classifiers=[
         "License :: OSI Approved :: Apache Software License",
