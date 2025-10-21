@@ -87,6 +87,17 @@ Kestra.timer = (name: string, duration: number | ((func: () => void) => void), t
 };
 
 /**
+ * Sends a gauge metric to the standard output.
+ *
+ * @param name - The name of the gauge.
+ * @param value - The value of the gauge.
+ * @param tags - The tags of the gauge.
+ */
+Kestra.gauge = (name: string, value: number, tags: any) => {
+  Kestra._metrics(name, 'gauge', value, tags);
+};
+
+/**
  * Provides an instance of the Logger.
  *
  * @returns A Logger instance.

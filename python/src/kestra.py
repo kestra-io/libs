@@ -161,6 +161,22 @@ class Kestra:
             Kestra._metrics(name, "timer", duration, tags)
 
     @staticmethod
+    def gauge(
+        name: str,
+        value: float,
+        tags: dict | None = None,
+    ):
+        """
+        The `Kestra` class provides a method to send gauge metrics to the Kestra server.
+
+        Args:
+            name (str): The name of the gauge.
+            value (float): The value of the gauge.
+            tags (dict): The tags of the gauge (optional).
+        """
+        Kestra._metrics(name, "gauge", value, tags)
+
+    @staticmethod
     def logger():
         """
         Get the logger for the Kestra server.
