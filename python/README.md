@@ -163,6 +163,14 @@ The `Kestra` class provides a method to send timer metrics to the Kestra server.
 Kestra.timer("my_timer", 1)
 ```
 
+### Gauges
+
+The `Kestra` class provides a method to send gauge metrics to the Kestra server.
+
+```python
+Kestra.gauge("my_gauge", 42.5)
+```
+
 ## Kestra Ion
 
 The `Kestra` ION extra provides a method to read files and convert them to a list of dictionaries.
