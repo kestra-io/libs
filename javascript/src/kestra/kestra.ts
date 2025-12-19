@@ -53,6 +53,12 @@ Kestra.outputs = (outputs: any) => {
   });
 };
 
+Kestra.assets = (asset: any) => {
+  Kestra._send({
+    assets: [asset],
+  });
+};
+
 /**
  * Sends a counter metric to the standard output.
  *

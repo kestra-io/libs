@@ -41,13 +41,13 @@ describe('Metrics', () => {
   describe('Counter', () => {
     test('should send counter metric', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
-      
+
       Kestra.counter('test_counter', 5);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       expect(call).toContain('::');
-      
+
       const jsonContent = call.replace(/^::|::$/g, '');
       const parsed = JSON.parse(jsonContent);
       expect(parsed).toEqual({
@@ -60,16 +60,16 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
       consoleSpy.mockRestore();
     });
 
     test('should send counter metric with tags', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
       const tags = { environment: 'test', service: 'api' };
-      
+
       Kestra.counter('test_counter', 10, tags);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       const jsonContent = call.replace(/^::|::$/g, '');
@@ -84,7 +84,7 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
       consoleSpy.mockRestore();
     });
   });
@@ -92,9 +92,9 @@ describe('Metrics', () => {
   describe('Timer', () => {
     test('should send timer metric with number', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
-      
+
       Kestra.timer('test_timer', 1000);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       const jsonContent = call.replace(/^::|::$/g, '');
@@ -109,20 +109,20 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
       consoleSpy.mockRestore();
     });
 
     test('should send timer metric with function', async () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
-      
+
       Kestra.timer('test_timer', (callback) => {
         setTimeout(callback, 10);
       });
-      
+
       // Wait for the async operation to complete
-      await new Promise(resolve => setTimeout(resolve, 20));
-      
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       const jsonContent = call.replace(/^::|::$/g, '');
@@ -131,7 +131,7 @@ describe('Metrics', () => {
       expect(parsed.metrics[0].type).toBe('timer');
       expect(typeof parsed.metrics[0].value).toBe('number');
       expect(parsed.metrics[0].value).toBeGreaterThan(0);
-      
+
       consoleSpy.mockRestore();
     });
   });
@@ -139,13 +139,13 @@ describe('Metrics', () => {
   describe('Gauge', () => {
     test('should send gauge metric', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
-      
+
       Kestra.gauge('test_gauge', 42.5);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       expect(call).toContain('::');
-      
+
       const jsonContent = call.replace(/^::|::$/g, '');
       const parsed = JSON.parse(jsonContent);
       expect(parsed).toEqual({
@@ -158,16 +158,16 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
       consoleSpy.mockRestore();
     });
 
     test('should send gauge metric with tags', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
       const tags = { instance: 'server-1', region: 'us-east-1' };
-      
+
       Kestra.gauge('memory_usage', 75.3, tags);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       const jsonContent = call.replace(/^::|::$/g, '');
@@ -182,15 +182,15 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
       consoleSpy.mockRestore();
     });
 
     test('should send gauge metric with integer value', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
-      
+
       Kestra.gauge('active_connections', 150);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       const jsonContent = call.replace(/^::|::$/g, '');
@@ -205,15 +205,15 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
       consoleSpy.mockRestore();
     });
 
     test('should send gauge metric with zero value', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
-      
+
       Kestra.gauge('queue_size', 0);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       const jsonContent = call.replace(/^::|::$/g, '');
@@ -228,15 +228,15 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
       consoleSpy.mockRestore();
     });
 
     test('should send gauge metric with negative value', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
-      
+
       Kestra.gauge('temperature', -5.2);
-      
+
       expect(consoleSpy).toHaveBeenCalledTimes(1);
       const call = consoleSpy.mock.calls[0][0];
       const jsonContent = call.replace(/^::|::$/g, '');
@@ -251,7 +251,47 @@ describe('Metrics', () => {
           },
         ],
       });
-      
+
+      consoleSpy.mockRestore();
+    });
+  });
+});
+
+describe('Assets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Simple send', () => {
+    test('should send an asset', () => {
+      const consoleSpy = vi.spyOn(global.console, 'log');
+
+      Kestra.assets({
+        id: 'test_asset',
+        type: 'VM',
+        metadata: {
+          owner: 'team_a',
+        },
+      });
+
+      expect(consoleSpy).toHaveBeenCalledTimes(1);
+      const call = consoleSpy.mock.calls[0][0];
+      expect(call).toContain('::');
+
+      const jsonContent = call.replace(/^::|::$/g, '');
+      const parsed = JSON.parse(jsonContent);
+      expect(parsed).toEqual({
+        assets: [
+          {
+            id: 'test_asset',
+            type: 'VM',
+            metadata: {
+              owner: 'team_a',
+            },
+          },
+        ],
+      });
+
       consoleSpy.mockRestore();
     });
   });

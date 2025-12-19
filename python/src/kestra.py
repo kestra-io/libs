@@ -33,7 +33,7 @@ class FlowExecution:
 
 class Kestra:
     """
-    Kestra Class that is in charge of sending metrics, outputs and logs to the
+    Kestra Class that is in charge of sending metrics, outputs, assets and logs to the
     Kestra server.
 
     Example - Set a counter:
@@ -41,6 +41,16 @@ class Kestra:
 
     Example - Send an output:
         Kestra.outputs({"my_output": "my_value"})
+
+    Example - Send an asset:
+        Kestra.assets({
+            "id": "my_asset",
+            "type": "TABLE",
+            "name": "MY_TABLE",
+            "metadata": {
+                "owner": "team-a"
+            }
+        })
 
     Example - Log an error:
         Kestra.logger().error("An error occurred")
@@ -116,6 +126,17 @@ class Kestra:
             map_ (dict): The outputs to send to the Kestra server.
         """
         Kestra._send({"outputs": map_})
+
+    @staticmethod
+    def assets(map_: dict):
+        """
+        The `Kestra` class provides a method to send a full asset to
+        the Kestra server.
+
+        Args:
+            map_ (dict): The full asset properties to send to the Kestra server.
+        """
+        Kestra._send({"assets": [map_]})
 
     @staticmethod
     def counter(
