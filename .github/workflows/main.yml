@@ -72,11 +72,6 @@ jobs:
         with:
           node-version: '22.x'
 
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18.x'
-          registry-url: 'https://registry.npmjs.org'
-
       # Trusted publishing need npm 11.+
       - name: Upgrade npm
         run: |
