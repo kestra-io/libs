@@ -1,0 +1,75 @@
+name: Tag version
+
+on:
+  workflow_dispatch:
+    inputs:
+      new_version:
+        type: string
+        required: true
+        description: The version to tag
+
+jobs:
+  tag-version:
+    name: Tag version
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Resolve incoming version
+        id: resolve-version
+        run: |
+          set -euo pipefail
+
+          NEW_KESTRA_VER="${{ inputs.new_version }}"
+
+          if [ -z "${NEW_KESTRA_VER}" ]; then
+            echo "No new version provided — failing workflow."
+            exit 1
+          fi
+
+          echo "NEW_KESTRA_VER=${NEW_KESTRA_VER}" >> $GITHUB_ENV
+          echo "Incoming version: ${NEW_KESTRA_VER}"
+
+      - name: Validate Kestra version format
+        id: validate-format
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${NEW_KESTRA_VER}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Kestra version '${NEW_KESTRA_VER}' is invalid. Must be in format vX.Y.Z (e.g., v1.2.3)."
+            exit 1
+          fi
+
+          echo "Kestra version format valid: ${NEW_KESTRA_VER}"
+
+      - name: Checkout branch
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          token: ${{ fromJson(inputs.secrets).GH_PERSONAL_TOKEN }}
+
+      - name: Read versions and create missing tag
+        id: read-latest
+        run: |
+          set -euo pipefail
+
+          # Ensure we have tags locally
+          git fetch --tags --prune
+
+          # Configure git author for tagging
+          git config user.email "actions@github.com"
+          git config user.name "tag-versioning-wf"
+
+          # Check remote
+          if git ls-remote --tags origin "${NEW_KESTRA_VER}" | grep -q "${NEW_KESTRA_VER}"; then
+            echo "Tag ${NEW_KESTRA_VER} already exists on remote. Nothing to do."
+            exit 0
+          fi
+
+          # Create annotated tag at current HEAD and push it
+          git tag -a "${NEW_KESTRA_VER}" -m "Automated tag for: ${NEW_KESTRA_VER}"
+          git push origin "${NEW_KESTRA_VER}"
+
+          echo "Tag ${NEW_KESTRA_VER} created and pushed."
