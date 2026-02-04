@@ -267,11 +267,21 @@ describe('Assets', () => {
       const consoleSpy = vi.spyOn(global.console, 'log');
 
       Kestra.assets({
-        id: 'test_asset',
-        type: 'VM',
-        metadata: {
-          owner: 'team_a',
-        },
+        inputs: [
+          {
+            id: 'input_asset',
+            type: 'INPUT_ASSET_TYPE',
+          },
+        ],
+        outputs: [
+          {
+            id: 'test_asset',
+            type: 'VM',
+            metadata: {
+              owner: 'team_a',
+            },
+          },
+        ],
       });
 
       expect(consoleSpy).toHaveBeenCalledTimes(1);
@@ -281,15 +291,23 @@ describe('Assets', () => {
       const jsonContent = call.replace(/^::|::$/g, '');
       const parsed = JSON.parse(jsonContent);
       expect(parsed).toEqual({
-        assets: [
-          {
-            id: 'test_asset',
-            type: 'VM',
-            metadata: {
-              owner: 'team_a',
+        assets: {
+          inputs: [
+            {
+              id: 'input_asset',
+              type: 'INPUT_ASSET_TYPE',
             },
-          },
-        ],
+          ],
+          outputs: [
+            {
+              id: 'test_asset',
+              type: 'VM',
+              metadata: {
+                owner: 'team_a',
+              },
+            },
+          ],
+        },
       });
 
       consoleSpy.mockRestore();

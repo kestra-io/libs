@@ -136,7 +136,7 @@ class Kestra:
         Args:
             map_ (dict): The full asset properties to send to the Kestra server.
         """
-        Kestra._send({"assets": [map_]})
+        Kestra._send({"assets": map_})
 
     @staticmethod
     def counter(
