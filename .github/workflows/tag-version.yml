@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           ref: main
-          token: ${{ fromJson(inputs.secrets).GH_PERSONAL_TOKEN }}
+          token: ${{ secrets.GH_PERSONAL_TOKEN }}
 
       - name: Read versions and create missing tag
         id: read-latest
