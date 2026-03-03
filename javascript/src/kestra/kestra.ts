@@ -53,9 +53,9 @@ Kestra.outputs = (outputs: any) => {
   });
 };
 
-Kestra.assets = (asset: any) => {
+Kestra.assets = (assets: any) => {
   Kestra._send({
-    assets: [asset],
+    assets,
   });
 };
 
