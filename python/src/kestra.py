@@ -135,6 +135,14 @@ class Kestra:
         Boolean values are automatically converted to their Python string
         representation ('True' or 'False') to prevent a NameError when
         referenced in downstream Python tasks via Pebble expressions.
+        
+        Example:
+            >>> import json
+            >>> results = []
+            >>> Kestra._send = lambda x: results.append(x)
+            >>> Kestra.outputs({'flag': True, 'count': 3, 'name': 'test'})
+            >>> results[0]
+            {'outputs': {'flag': 'True', 'count': 3, 'name': 'test'}}
 
         Args:
             map_ (dict): The outputs to send to the Kestra server.
