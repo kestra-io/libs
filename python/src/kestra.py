@@ -115,6 +115,16 @@ class Kestra:
         )
 
     @staticmethod
+    def _convert_booleans(obj: Any) -> Any:
+        if isinstance(obj, bool):
+            return str(obj)
+        elif isinstance(obj, dict):
+            return {k: Kestra._convert_booleans(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [Kestra._convert_booleans(item) for item in obj]
+        return obj
+
+    @staticmethod
     def outputs(map_: dict):
         """
         The `Kestra` class provides a method to send key-value-based outputs to
@@ -122,10 +132,22 @@ class Kestra:
         file and specify them within the `outputFiles` property of the Python
         script task.
 
+        Boolean values are automatically converted to their Python string
+        representation ('True' or 'False') to prevent a NameError when
+        referenced in downstream Python tasks via Pebble expressions.
+        
+        Example:
+            >>> import json
+            >>> results = []
+            >>> Kestra._send = lambda x: results.append(x)
+            >>> Kestra.outputs({'flag': True, 'count': 3, 'name': 'test'})
+            >>> results[0]
+            {'outputs': {'flag': 'True', 'count': 3, 'name': 'test'}}
+
         Args:
             map_ (dict): The outputs to send to the Kestra server.
         """
-        Kestra._send({"outputs": map_})
+        Kestra._send({"outputs": Kestra._convert_booleans(map_)})
 
     @staticmethod
     def assets(map_: dict):
