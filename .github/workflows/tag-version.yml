@@ -45,10 +45,11 @@ jobs:
           echo "Kestra version format valid: ${NEW_KESTRA_VER}"
 
       - name: Checkout branch
-        uses: actions/checkout@v5
+        uses: kestra-io/actions/composite/checkout-and-auth@main
         with:
+          gh-app-id: ${{ secrets.GH_BOT_APP_ID }}
+          gh-app-private-key: ${{ secrets.GH_BOT_PRIVATE_KEY }}
           ref: main
-          token: ${{ secrets.GH_PERSONAL_TOKEN }}
 
       - name: Read versions and create missing tag
         id: read-latest
