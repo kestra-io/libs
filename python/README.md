@@ -197,11 +197,17 @@ file is available.
 It is loaded lazily on first access and raises a `FileNotFoundError` when the script
 does not run inside a Kestra task.
 
+Nested objects are wrapped, including those inside lists, so any depth can be
+traversed with attributes: `context.inputs.my_list[0].my_key`.
+
+`context` is a read-only `Mapping`, so `len()`, `in`, iteration, `keys()`, `values()`,
+`items()`, `get()` and `dict(context)` all work as expected.
+
 ### Methods
 
-- **context[name]**: Same as attribute access, useful for keys that are not valid Python identifiers.
+- **context[name]**: Same as attribute access. Required for keys that are not valid Python identifiers, or that collide with a method name such as `context["items"]`.
 - **context.get(name, default=None)**: Returns `default` instead of raising when the key is missing.
-- **context.to_dict()**: Returns the raw context as a `dict`.
+- **context.to_dict()**: Returns the raw context as a plain `dict`, ready for `json.dumps`.
 - **load_execution_context(path=None) -> ExecutionContext**: Loads the context explicitly, from `path` when given.
 
 ## Kestra Ion

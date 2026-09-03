@@ -1,5 +1,7 @@
 import base64
+import copy
 import json
+import pickle
 
 import pytest
 
@@ -8,7 +10,7 @@ from kestra import ExecutionContext, load_execution_context
 
 CONTEXT = {
     "labels": {"env": "prod"},
-    "inputs": {"my_input": "a\nmultiline \"value\""},
+    "inputs": {"my_input": "a\nmultiline \"value\"", "files": [{"name": "first"}, 2]},
     "vars": {"my_var": 42},
     "trigger": {"startDate": "2025-01-01T00:00:00Z"},
     "outputs": {"prev_task": {"uri": "kestra:///my/file.csv"}},
@@ -70,17 +72,55 @@ def test_missing_key_lists_available_keys():
         context.vars
 
 
-def test_dict_helpers():
+def test_objects_nested_in_lists_are_wrapped():
+    context = ExecutionContext(CONTEXT)
+
+    assert context.inputs.files[0].name == "first"
+    assert context.inputs.files[1] == 2
+
+
+def test_is_a_mapping():
     context = ExecutionContext(CONTEXT)
 
     assert "labels" in context
+    assert len(context) == 5
     assert sorted(context) == ["inputs", "labels", "outputs", "trigger", "vars"]
-    assert context.to_dict() is CONTEXT
+    assert dict(context.labels) == {"env": "prod"}
+    assert list(context.labels.items()) == [("env", "prod")]
     assert context["labels"] == {"env": "prod"}
     assert context.get("nope", "default") == "default"
     assert context.get("labels").env == "prod"
 
 
+def test_to_dict_returns_plain_types():
+    context = ExecutionContext(CONTEXT)
+
+    assert context.to_dict() is CONTEXT
+    assert json.loads(json.dumps(context.to_dict())) == CONTEXT
+
+
+def test_keys_shadowing_a_method_stay_reachable():
+    context = ExecutionContext({"items": "not the method", "get": "neither"})
+
+    assert context["items"] == "not the method"
+    assert context["get"] == "neither"
+
+
+def test_can_be_copied_and_pickled():
+    context = ExecutionContext(CONTEXT)
+
+    assert copy.copy(context).labels.env == "prod"
+    assert copy.deepcopy(context).labels.env == "prod"
+    assert pickle.loads(pickle.dumps(context)).labels.env == "prod"
+
+
 def test_module_getattr_still_raises_for_unknown():
     with pytest.raises(AttributeError, match="has no attribute 'nope'"):
         kestra.nope
+
+
+def test_repr_mirrors_the_wrapped_data():
+    context = ExecutionContext({"labels": {"env": "prod"}})
+
+    assert repr(context) == "{'labels': {'env': 'prod'}}"
+    assert repr(dict(context)) == "{'labels': {'env': 'prod'}}"
