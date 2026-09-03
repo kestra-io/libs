@@ -171,6 +171,39 @@ The `Kestra` class provides a method to send gauge metrics to the Kestra server.
 Kestra.gauge("my_gauge", 42.5)
 ```
 
+## Execution Context
+
+The `context` object exposes the metadata of the current execution, so scripts stay
+plain Python instead of embedding Pebble expressions:
+
+```python
+import pandas as pd
+from kestra import context
+
+my_labels = context.labels
+my_inputs = context.inputs
+my_vars = context.vars
+start_date = context.trigger.startDate
+csv_path = context.outputs.prev_task.uri  # outputs from previous tasks
+
+df = pd.read_csv(csv_path)
+```
+
+The context is read from the `.kestra-execution-context.json` file that Kestra injects
+into the task working directory. Use `KESTRA_EXECUTION_CONTEXT_FILE` to read it from
+another path, or set the base64-encoded `KESTRA_CONTEXT` environment variable when no
+file is available.
+
+It is loaded lazily on first access and raises a `FileNotFoundError` when the script
+does not run inside a Kestra task.
+
+### Methods
+
+- **context[name]**: Same as attribute access, useful for keys that are not valid Python identifiers.
+- **context.get(name, default=None)**: Returns `default` instead of raising when the key is missing.
+- **context.to_dict()**: Returns the raw context as a `dict`.
+- **load_execution_context(path=None) -> ExecutionContext**: Loads the context explicitly, from `path` when given.
+
 ## Kestra Ion
 
 The `Kestra` ION extra provides a method to read files and convert them to a list of dictionaries.

@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -717,3 +718,127 @@ class Flow:
             result.error = None
 
         return result
+
+
+CONTEXT_FILE = ".kestra-execution-context.json"
+
+
+class ExecutionContext:
+    """
+    Read-only view over the Kestra execution context, with attribute access.
+
+    Example:
+        from kestra import context
+
+        my_labels = context.labels
+        start_date = context.trigger.startDate
+        csv_path = context.outputs.prev_task.uri
+    """
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data: dict[str, Any]):
+        object.__setattr__(self, "_data", data)
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(
+                f"'{name}' is not available in the execution context "
+                f"(available: {', '.join(sorted(self._data)) or 'none'})"
+            ) from None
+
+    def __getitem__(self, name: str) -> Any:
+        value = self._data[name]
+
+        return ExecutionContext(value) if isinstance(value, dict) else value
+
+    def get(self, name: str, default: Any = None) -> Any:
+        """
+        Get a value from the execution context, or `default` when missing.
+
+        Args:
+            name (str): The key to look up.
+            default (Any): The value returned when the key is missing.
+
+        Returns:
+            Any: The value, wrapped in an `ExecutionContext` when it is a dict.
+        """
+        try:
+            return self[name]
+        except KeyError:
+            return default
+
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Returns:
+            dict[str, Any]: The raw execution context data.
+        """
+        return self._data
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._data
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, ExecutionContext):
+            return self._data == other._data
+
+        return self._data == other
+
+    def __repr__(self) -> str:
+        return f"ExecutionContext({self._data!r})"
+
+
+def load_execution_context(path: Optional[str] = None) -> ExecutionContext:
+    """
+    Load the execution context injected by Kestra into the task working directory.
+
+    The context is read from `path`, from the `KESTRA_EXECUTION_CONTEXT_FILE`
+    environment variable, or from `.kestra-execution-context.json`. When no file
+    exists, the base64-encoded `KESTRA_CONTEXT` environment variable is used as a
+    fallback.
+
+    Args:
+        path (str): The path to the context file (optional).
+
+    Returns:
+        ExecutionContext: The execution context.
+
+    Raises:
+        FileNotFoundError: When no execution context can be found.
+    """
+    path = path or os.environ.get("KESTRA_EXECUTION_CONTEXT_FILE", CONTEXT_FILE)
+
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as file:
+            return ExecutionContext(json.load(file))
+
+    encoded = os.environ.get("KESTRA_CONTEXT")
+    if encoded:
+        return ExecutionContext(json.loads(base64.b64decode(encoded)))
+
+    raise FileNotFoundError(
+        f"No Kestra execution context found: '{path}' does not exist and the "
+        "KESTRA_CONTEXT environment variable is not set. The execution context is "
+        "only available when the script runs inside a Kestra task."
+    )
+
+
+_context: Optional[ExecutionContext] = None
+
+
+def __getattr__(name: str) -> Any:
+    # Loaded lazily so that importing this module never requires a Kestra execution.
+    if name == "context":
+        global _context
+
+        if _context is None:
+            _context = load_execution_context()
+
+        return _context
+
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
