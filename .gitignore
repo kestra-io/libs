@@ -22,3 +22,9 @@ python/.venv
 javascript/gradle.properties
 javascript/node_modules/*
 dist/
+
+### PHP
+php/vendor/
+php/composer.lock
+php/.phpunit.cache/
+php/.phpunit.result.cache

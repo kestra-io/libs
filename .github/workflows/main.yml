@@ -101,6 +101,25 @@ jobs:
         working-directory: javascript
         run: npm publish --access public
 
+  php:
+    name: Test PHP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+
+      - name: Install dependencies
+        working-directory: php
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run unit tests
+        working-directory: php
+        run: vendor/bin/phpunit
 
   release:
     name: Create GitHub Release
@@ -108,6 +127,7 @@ jobs:
     needs:
       - pip
       - npm
+      - php
     steps:
       - name: Create Release
         uses: actions/create-release@v1
