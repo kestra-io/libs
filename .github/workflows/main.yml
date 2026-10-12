@@ -101,6 +101,28 @@ jobs:
         working-directory: javascript
         run: npm publish --access public
 
+  dotnet:
+    name: Test .NET
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        working-directory: dotnet
+        run: dotnet restore
+
+      - name: Build
+        working-directory: dotnet
+        run: dotnet build --no-restore
+
+      - name: Run unit tests
+        working-directory: dotnet
+        run: dotnet test --no-build --verbosity normal
 
   release:
     name: Create GitHub Release
@@ -108,6 +130,7 @@ jobs:
     needs:
       - pip
       - npm
+      - dotnet
     steps:
       - name: Create Release
         uses: actions/create-release@v1

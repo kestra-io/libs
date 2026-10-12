@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <PackageId>Kestra</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Kestra</Authors>
+    <Company>Kestra</Company>
+    <Description>Kestra client library to send outputs, metrics, assets, and logs from .NET / C# script tasks.</Description>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/kestra-io/libs</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/kestra-io/libs.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RootNamespace>Kestra</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>
