@@ -18,6 +18,7 @@ The `Kestra` class is responsible for sending metrics, outputs, and logs to the 
 - **format(map\_: dict) -> str**: Formats a message to be sent to the Kestra server.
 - **\_metrics(name: str, type\_: str, value: int, tags: dict | None = None)**: Sends a metric to the Kestra server.
 - **outputs(map\_: dict)**: Sends outputs to the Kestra server.
+- **files(data) -> str**: Writes mapping records to an Ion file and announces it for worker collection.
 - **counter(name: str, value: int, tags: dict | None = None)**: Sends a counter to the Kestra server.
 - **timer(name: str, duration: int | Callable, tags: dict | None = None)**: Sends a timer to the Kestra server.
 - **logger() -> Logger**: Retrieves the logger for the Kestra server.
@@ -212,13 +213,54 @@ traversed with attributes: `context.inputs.my_list[0].my_key`.
 
 ## Kestra Ion
 
-The `Kestra` ION extra provides a method to read files and convert them to a list of dictionaries.
+Amazon Ion support is included in `pip install kestra`; `amazon.ion` is a runtime dependency.
 
-### Installation
+### Writing and announcing files
 
-```bash
-pip install kestra[ion]
+```python
+from pathlib import Path
+from kestra import Kestra
+
+path = Kestra.files([
+    {"id": 1, "name": "Ada", "tags": ["python", "数据"]},
+    {"id": 2, "name": "Grace", "active": True},
+])
+Kestra.outputs({"filename": Path(path).name})
 ```
+
+`files(data)` accepts an iterable of mappings, including generators (consumed once).
+A single mapping, strings, bytes, scalars, and non-mapping records raise `TypeError`.
+Each record is written as a separate top-level Ion struct, preserving nested values
+supported by `amazon.ion`. No pandas conversion or custom serialization is performed.
+An empty iterable creates and announces an empty file; `Kestra.read(path)` returns `[]`.
+Serialization, iteration, and write failures propagate, remove the partial file, and
+emit no successful announcement.
+
+The method returns an absolute **local file path**, not a Kestra storage URI. It creates
+a unique `.ion` file in `WORKING_DIR`, falling back to the current directory outside
+Kestra, closes it, then prints `::{"outputFiles": ["<filename>.ion"]}::`.
+The file remains available after return. The worker may remove it during collection;
+otherwise it is removed with the task working directory. Downstream tasks use the URI from
+`outputs.producer.outputFiles[outputs.producer.vars.filename]` through `inputFiles`,
+then call `Kestra.read()` on that local input file.
+
+Automatic persistence requires companion worker support for top-level `outputFiles`
+announcements; this is not supported by the current upstream worker. No released
+compatibility version is claimed. The companion implementation supports Process and
+Docker with `wait: true` and `fileHandlingStrategy: VOLUME`. Received announcements
+from remote runners or other Docker configurations are rejected; remote directory
+synchronization alone does not enable this feature. Asynchronous Docker does not
+consume task logs, so it cannot observe or persist these announcements.
+
+Dynamic collection requires a worker filesystem with Java `SecureDirectoryStream`
+support and rejects symbolic links. Filesystems without that capability fail closed
+instead of using unsafe path-based uploads; Windows workers are not supported.
+Docker VOLUME archive extraction also requires secure directory streams, including
+for configured output files. It fails closed when that capability is unavailable.
+Without companion support, declare a matching task-level `outputFiles` pattern.
+With this companion implementation on an unsupported runner, write Ion files directly
+and use configured `outputFiles` instead of emitting `Kestra.files()` announcements.
+
 ### Methods
 
 - **read(path_: str) -> list[dict[str, Any]]**: Reads an Ion file and converts it to a list of dictionaries.

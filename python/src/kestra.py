@@ -4,8 +4,9 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging import Logger
@@ -271,6 +272,39 @@ class Kestra:
             return [Kestra._convert_ion_types(item) for item in value]
         else:
             return value
+
+    @staticmethod
+    def files(data: Iterable[Mapping[str, Any]]) -> str:
+        """Write records as an Ion stream and announce the file for worker collection.
+
+        Iterators are consumed once. Empty input creates an empty Ion stream.
+        Returns the absolute local path, not an internal-storage URI. The worker
+        collects the closed file before task cleanup. Requires a worker with
+        dynamic output-file support.
+        """
+        if isinstance(data, (Mapping, str, bytes)):
+            raise TypeError("data must be an iterable of mappings")
+        records = iter(data)
+
+        file = tempfile.NamedTemporaryFile(
+            mode="wb",
+            suffix=".ion",
+            dir=os.environ.get("WORKING_DIR", "."),
+            delete=False,
+        )
+        try:
+            with file:
+                for record in records:
+                    if not isinstance(record, Mapping):
+                        raise TypeError("each record must be a mapping")
+                    ion.dump(dict(record), file, binary=False, omit_version_marker=True)
+                    file.write(b"\n")
+        except BaseException:
+            os.unlink(file.name)
+            raise
+
+        Kestra._send({"outputFiles": [os.path.basename(file.name)]})
+        return file.name
 
     @staticmethod
     def read(path_: str) -> list[dict[str, Any]]:
@@ -729,7 +763,7 @@ def _wrap(value: Any) -> Any:
         return ExecutionContext(value)
 
     if isinstance(value, list):
-        # ponytail: rebuilt on each access, execution contexts are small enough
+        # Execution contexts are small enough to rebuild this view on each access.
         return [_wrap(item) for item in value]
 
     return value
