@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 import tempfile
 from collections import UserDict
 from datetime import datetime, timezone
@@ -28,6 +30,8 @@ def test_files_writes_top_level_records(count, tmp_path, capsys):
     assert path.parent == tmp_path
     assert path.suffix == ".ion"
     assert path.is_file()
+    if count:
+        assert path.read_text(encoding="utf-8").startswith("{")
     values = ion.loads(path.read_bytes(), single_value=False)
     assert len(values) == count
     assert all(value.ion_type == IonType.STRUCT for value in values)
@@ -142,6 +146,41 @@ def test_files_cleans_up_after_write_failure(tmp_path, capsys, monkeypatch):
 
     assert not list(tmp_path.iterdir())
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("original_error", [TypeError, OSError])
+@pytest.mark.parametrize("cleanup_error", [FileNotFoundError, PermissionError])
+def test_files_preserves_original_error_when_cleanup_fails(
+    original_error, cleanup_error, tmp_path, capsys, monkeypatch
+):
+    original = original_error("serialization or write failed")
+    unlink = os.unlink
+
+    def fail_write(data, file, **kwargs):
+        file.write(b"partial")
+        raise original
+
+    def fail_unlink(path):
+        if cleanup_error is FileNotFoundError:
+            unlink(path)
+        raise cleanup_error("cleanup failed")
+
+    monkeypatch.setattr(ion, "dump", fail_write)
+    monkeypatch.setattr(os, "unlink", fail_unlink)
+
+    with pytest.raises(type(original)) as error:
+        Kestra.files([{"id": 1}])
+
+    assert error.value is original
+    assert capsys.readouterr().out == ""
+    assert bool(list(tmp_path.iterdir())) is (cleanup_error is PermissionError)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file permissions")
+def test_files_keeps_temporary_file_private():
+    path = Path(Kestra.files([{"id": 1}]))
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_files_does_not_announce_when_creation_fails(tmp_path, capsys, monkeypatch):

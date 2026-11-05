@@ -231,10 +231,15 @@ Kestra.outputs({"filename": Path(path).name})
 `files(data)` accepts an iterable of mappings, including generators (consumed once).
 A single mapping, strings, bytes, scalars, and non-mapping records raise `TypeError`.
 Each record is written as a separate top-level Ion struct, preserving nested values
-supported by `amazon.ion`. No pandas conversion or custom serialization is performed.
+supported by `amazon.ion`. Text Ion (`binary=False`) is intentional: newline-separated
+records remain human-readable and compatible with Kestra's text Ion streams and
+`Kestra.read()`. Binary Ion can be smaller, but is not emitted by this helper.
+No pandas conversion or custom serialization is performed.
 An empty iterable creates and announces an empty file; `Kestra.read(path)` returns `[]`.
-Serialization, iteration, and write failures propagate, remove the partial file, and
-emit no successful announcement.
+Serialization, iteration, and write failures propagate without a successful
+announcement. Partial-file removal is best effort: a missing file or another OS
+cleanup error never masks the original exception. If deletion fails, the partial
+file may remain until the task working directory is cleaned up.
 
 The method returns an absolute **local file path**, not a Kestra storage URI. It creates
 a unique `.ion` file in `WORKING_DIR`, falling back to the current directory outside
@@ -244,9 +249,12 @@ otherwise it is removed with the task working directory. Downstream tasks use th
 `outputs.producer.outputFiles[outputs.producer.vars.filename]` through `inputFiles`,
 then call `Kestra.read()` on that local input file.
 
-Automatic persistence requires companion worker support for top-level `outputFiles`
-announcements; this is not supported by the current upstream worker. No released
-compatibility version is claimed. The companion implementation supports Process and
+Automatic persistence requires the companion worker functionality in
+[kestra-io/kestra#22272](https://github.com/kestra-io/kestra/pull/22272) for top-level
+`outputFiles` announcements. Do not release this helper before that core functionality
+is released; no minimum compatible worker version is claimed yet. Installing a client
+library that emits the marker alone does not enable persistence.
+The companion implementation supports Process and
 Docker with `wait: true` and `fileHandlingStrategy: VOLUME`. Received announcements
 from remote runners or other Docker configurations are rejected; remote directory
 synchronization alone does not enable this feature. Asynchronous Docker does not
@@ -255,11 +263,25 @@ consume task logs, so it cannot observe or persist these announcements.
 Dynamic collection requires a worker filesystem with Java `SecureDirectoryStream`
 support and rejects symbolic links. Filesystems without that capability fail closed
 instead of using unsafe path-based uploads; Windows workers are not supported.
-Docker VOLUME archive extraction also requires secure directory streams, including
-for configured output files. It fails closed when that capability is unavailable.
+Docker dynamic extraction also requires a worker-controlled staging parent and
+same-filesystem atomic moves. Ordinary Docker VOLUME downloads without announcements
+retain their existing support and do not require secure directory streams.
 Without companion support, declare a matching task-level `outputFiles` pattern.
 With this companion implementation on an unsupported runner, write Ion files directly
 and use configured `outputFiles` instead of emitting `Kestra.files()` announcements.
+
+The helper retains `NamedTemporaryFile`'s private POSIX permissions (`0600`); it does
+not make generated data group- or world-readable. With Docker VOLUME, the daemon
+returns an archive and the worker creates its own local files with those permissions,
+so a different producer-container UID alone does not prevent worker collection.
+Another unprivileged UID reading the original file inside the container volume can
+receive `PermissionError`; direct shared-filesystem access also requires compatible
+ownership or explicit access provisioning. Docker MOUNT announcements remain unsupported.
+Do not broaden file permissions merely to bypass this restriction.
+
+JavaScript parity is a follow-up requirement tracked by
+[kestra-io/libs#8](https://github.com/kestra-io/libs/issues/8); the equivalent helper
+in `javascript/` and a dedicated follow-up issue remain to be completed.
 
 ### Methods
 

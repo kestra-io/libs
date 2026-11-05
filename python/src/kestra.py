@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging import Logger
@@ -275,7 +276,7 @@ class Kestra:
 
     @staticmethod
     def files(data: Iterable[Mapping[str, Any]]) -> str:
-        """Write records as an Ion stream and announce the file for worker collection.
+        """Write records as a text Ion stream and announce the file for worker collection.
 
         Iterators are consumed once. Empty input creates an empty Ion stream.
         Returns the absolute local path, not an internal-storage URI. The worker
@@ -300,7 +301,8 @@ class Kestra:
                     ion.dump(dict(record), file, binary=False, omit_version_marker=True)
                     file.write(b"\n")
         except BaseException:
-            os.unlink(file.name)
+            with suppress(OSError):
+                os.unlink(file.name)
             raise
 
         Kestra._send({"outputFiles": [os.path.basename(file.name)]})
@@ -763,7 +765,7 @@ def _wrap(value: Any) -> Any:
         return ExecutionContext(value)
 
     if isinstance(value, list):
-        # Execution contexts are small enough to rebuild this view on each access.
+        # ponytail: rebuilt on each access, execution contexts are small enough
         return [_wrap(item) for item in value]
 
     return value
