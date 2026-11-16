@@ -102,12 +102,30 @@ jobs:
         run: npm publish --access public
 
 
+  powershell:
+    name: Test PowerShell module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Lint and test
+        shell: pwsh
+        working-directory: powershell
+        run: |
+          Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $issues = Invoke-ScriptAnalyzer -Path ./Kestra -Recurse -Severity Warning,Error
+          $issues | Format-Table -AutoSize
+          if ($issues) { exit 1 }
+          Invoke-Pester -Path ./tests -CI
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs:
       - pip
       - npm
+      - powershell
     steps:
       - name: Create Release
         uses: actions/create-release@v1
