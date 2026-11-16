@@ -79,10 +79,12 @@ jobs:
           npm version
 
       - name: Set version
+        if: startsWith(github.ref, 'refs/tags/v')
         id: set_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
 
       - name: Copy Readme
+        if: startsWith(github.ref, 'refs/tags/v')
         working-directory: javascript
         run: |
           curl -s https://raw.githubusercontent.com/kestra-io/kestra/master/README.md > README.md
@@ -122,6 +124,7 @@ jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - pip
       - npm
