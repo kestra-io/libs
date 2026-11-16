@@ -105,20 +105,40 @@ jobs:
 
 
   powershell:
-    name: Test PowerShell module
-    runs-on: ubuntu-latest
+    name: Test PowerShell module (${{ matrix.shell }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            shell: pwsh
+          # Windows PowerShell 5.1, which the module supports
+          - os: windows-latest
+            shell: powershell
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+        working-directory: powershell
     steps:
       - uses: actions/checkout@v6
 
-      - name: Lint and test
-        shell: pwsh
-        working-directory: powershell
+      - name: Install test tools
         run: |
-          Install-Module Pester -MinimumVersion 5.0 -Force -Scope CurrentUser -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser
+
+      - name: Lint
+        run: |
           $issues = Invoke-ScriptAnalyzer -Path ./Kestra -Recurse -Severity Warning,Error
           $issues | Format-Table -AutoSize
           if ($issues) { exit 1 }
+
+      - name: Test
+        run: |
+          Import-Module Pester -RequiredVersion 5.7.1
           Invoke-Pester -Path ./tests -CI
 
   release:

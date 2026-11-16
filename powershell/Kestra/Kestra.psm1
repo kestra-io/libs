@@ -18,20 +18,35 @@ function Send-KestraMessage {
     [Console]::Out.WriteLine((Format-KestraMessage -Message $Message))
 }
 
+# Accepts a hashtable or a PSCustomObject, as returned by ConvertFrom-Json, Invoke-RestMethod or Select-Object.
+function ConvertTo-KestraMap {
+    param([object] $InputObject, [string] $What)
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        return $InputObject
+    }
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $map = [ordered]@{}
+        foreach ($property in $InputObject.PSObject.Properties) {
+            $map[$property.Name] = $property.Value
+        }
+        return $map
+    }
+    throw [System.ArgumentException]::new("$What must be a hashtable or a PSCustomObject, for example @{ rows = 42 }.")
+}
+
 function Send-KestraMetric {
     param(
         [string] $Name,
         [string] $Type,
         [double] $Value,
-        [System.Collections.IDictionary] $Tags
+        [object] $Tags
     )
 
     if ([double]::IsNaN($Value) -or [double]::IsInfinity($Value)) {
         throw [System.ArgumentException]::new("Metric '$Name' value must be a finite number.")
     }
-    if ($null -eq $Tags) {
-        $Tags = @{}
-    }
+    $Tags = if ($null -eq $Tags) { @{} } else { ConvertTo-KestraMap -InputObject $Tags -What 'Tags' }
 
     $metric = [ordered]@{ name = $Name; type = $Type; value = $Value; tags = $Tags }
     Send-KestraMessage -Message @{ metrics = @($metric) }
@@ -43,14 +58,17 @@ function Send-KestraOutput {
     Sends task outputs to Kestra, readable as outputs.<task>.vars.<key>.
     .EXAMPLE
     Send-KestraOutput @{ disabled = 42; status = 'ok' }
+    .EXAMPLE
+    Send-KestraOutput (Invoke-RestMethod https://api.example.com/status)
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory, Position = 0)] [System.Collections.IDictionary] $Outputs)
+    param([Parameter(Mandatory, Position = 0)] [object] $Outputs)
 
-    if ($Outputs.Count -eq 0) {
+    $map = ConvertTo-KestraMap -InputObject $Outputs -What 'Outputs'
+    if ($map.Count -eq 0) {
         throw [System.ArgumentException]::new('Outputs must contain at least one key, for example @{ rows = 42 }.')
     }
-    Send-KestraMessage -Message @{ outputs = $Outputs }
+    Send-KestraMessage -Message @{ outputs = $map }
 }
 
 function Send-KestraCounter {
@@ -64,7 +82,7 @@ function Send-KestraCounter {
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateNotNullOrEmpty()] [string] $Name,
         [Parameter(Mandatory, Position = 1)] [double] $Value,
-        [Parameter(Position = 2)] [System.Collections.IDictionary] $Tags
+        [Parameter(Position = 2)] [object] $Tags
     )
 
     Send-KestraMetric -Name $Name -Type 'counter' -Value $Value -Tags $Tags
@@ -81,7 +99,7 @@ function Send-KestraGauge {
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateNotNullOrEmpty()] [string] $Name,
         [Parameter(Mandatory, Position = 1)] [double] $Value,
-        [Parameter(Position = 2)] [System.Collections.IDictionary] $Tags
+        [Parameter(Position = 2)] [object] $Tags
     )
 
     Send-KestraMetric -Name $Name -Type 'gauge' -Value $Value -Tags $Tags
@@ -103,7 +121,7 @@ function Send-KestraTimer {
         [Parameter(Mandatory, Position = 0)] [ValidateNotNullOrEmpty()] [string] $Name,
         [Parameter(Mandatory, Position = 1, ParameterSetName = 'Seconds')] [double] $Seconds,
         [Parameter(Mandatory, ParameterSetName = 'ScriptBlock')] [scriptblock] $ScriptBlock,
-        [System.Collections.IDictionary] $Tags
+        [Parameter(Position = 2)] [object] $Tags
     )
 
     if ($PSCmdlet.ParameterSetName -eq 'Seconds') {
@@ -126,7 +144,7 @@ function Write-KestraLog {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateSet('Trace', 'Debug', 'Info', 'Warn', 'Error')] [string] $Level,
-        [Parameter(Mandatory, Position = 1)] [string] $Message
+        [Parameter(Mandatory, Position = 1)] [AllowEmptyString()] [string] $Message
     )
 
     $log = [ordered]@{ level = $Level.ToUpperInvariant(); message = $Message }

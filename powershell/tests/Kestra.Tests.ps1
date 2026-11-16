@@ -47,8 +47,19 @@ Describe 'Send-KestraOutput' {
         $lines[0] | Should -BeExactly '::{"outputs":{"rows":1}}::'
     }
 
-    It 'rejects empty outputs' {
+    It 'accepts a PSCustomObject, as returned by ConvertFrom-Json or Invoke-RestMethod' {
+        $status = '{"rows": 42, "name": "caf\u00e9", "nested": {"ok": true}}' | ConvertFrom-Json
+        $payload = ConvertFrom-Emitted (Get-Emitted { Send-KestraOutput $status })
+
+        $payload.outputs.rows | Should -Be 42
+        $payload.outputs.name | Should -BeExactly ('caf' + [char]0xe9)
+        $payload.outputs.nested.ok | Should -BeTrue
+    }
+
+    It 'rejects empty outputs and values that are not maps' {
         { Send-KestraOutput @{} } | Should -Throw '*at least one key*'
+        { Send-KestraOutput ([pscustomobject]@{}) } | Should -Throw '*at least one key*'
+        { Send-KestraOutput @(1, 2) } | Should -Throw '*must be a hashtable or a PSCustomObject*'
     }
 }
 
@@ -68,6 +79,14 @@ Describe 'metrics' {
         $metric.type | Should -Be 'gauge'
         $metric.value | Should -Be 3
         $metric.tags.env | Should -Be 'prod'
+    }
+
+    It 'accepts PSCustomObject tags and positional timer tags' {
+        $gauge = (ConvertFrom-Emitted (Get-Emitted { Send-KestraGauge queue 3 ([pscustomobject]@{ env = 'prod' }) })).metrics[0]
+        $timer = (ConvertFrom-Emitted (Get-Emitted { Send-KestraTimer export 2.5 @{ env = 'prod' } })).metrics[0]
+
+        $gauge.tags.env | Should -Be 'prod'
+        $timer.tags.env | Should -Be 'prod'
     }
 
     It 'rejects non-finite values and empty names' {
@@ -96,6 +115,11 @@ Describe 'Write-KestraLog' {
     It 'writes the level in upper case' {
         Get-Emitted { Write-KestraLog warn '3 accounts skipped' } |
             Should -BeExactly '::{"logs":[{"level":"WARN","message":"3 accounts skipped"}]}::'
+    }
+
+    It 'accepts an empty message' {
+        Get-Emitted { Write-KestraLog Info '' } |
+            Should -BeExactly '::{"logs":[{"level":"INFO","message":""}]}::'
     }
 
     It 'rejects unknown levels' {

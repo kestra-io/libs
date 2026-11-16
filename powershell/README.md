@@ -5,9 +5,11 @@ Send outputs, metrics and logs from PowerShell script tasks to Kestra. Each call
 ## Install
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/kestra-io/libs/main/powershell/Kestra/Kestra.psm1 -OutFile Kestra.psm1
+Invoke-WebRequest https://raw.githubusercontent.com/kestra-io/libs/main/powershell/Kestra/Kestra.psm1 -OutFile Kestra.psm1 -UseBasicParsing
 Import-Module ./Kestra.psm1
 ```
+
+Replace `main` with a release tag in production flows, so a push to `main` cannot change what runs. `-UseBasicParsing` is needed on Windows PowerShell 5.1 without Internet Explorer and ignored on PowerShell 7.
 
 ## Usage
 
@@ -19,7 +21,7 @@ tasks:
   - id: cleanup
     type: io.kestra.plugin.scripts.powershell.Script
     beforeCommands:
-      - Invoke-WebRequest https://raw.githubusercontent.com/kestra-io/libs/main/powershell/Kestra/Kestra.psm1 -OutFile Kestra.psm1
+      - Invoke-WebRequest https://raw.githubusercontent.com/kestra-io/libs/main/powershell/Kestra/Kestra.psm1 -OutFile Kestra.psm1 -UseBasicParsing
     script: |
       Import-Module ./Kestra.psm1
 
@@ -35,10 +37,12 @@ tasks:
 
 | Command | Result in Kestra |
 |---------|------------------|
-| `Send-KestraOutput @{ ... }` | Task outputs under `outputs.<task>.vars` |
+| `Send-KestraOutput <hashtable or PSCustomObject>` | Task outputs under `outputs.<task>.vars` |
 | `Send-KestraCounter <name> <value> [@{ tags }]` | Counter metric |
 | `Send-KestraGauge <name> <value> [@{ tags }]` | Gauge metric |
-| `Send-KestraTimer <name> <seconds>` or `-ScriptBlock { }` | Timer metric. A script block is timed and its output returned |
+| `Send-KestraTimer <name> <seconds> [@{ tags }]` or `-ScriptBlock { }` | Timer metric. A script block is timed and its output returned |
 | `Write-KestraLog <Trace\|Debug\|Info\|Warn\|Error> <message>` | Log line at that level |
 
 The commands write straight to the console, so `$x = Send-KestraOutput ...` or calls inside a function whose output is captured still reach Kestra.
+
+Send plain values, hashtables or `PSCustomObject`s. Raw .NET objects such as `Get-Item` or `Get-Process` results serialize their whole object graph, so pick the properties first, for example `Get-Process | Select-Object Name, Id`. On Windows PowerShell 5.1, convert dates with `.ToString('o')`, since 5.1 serializes `DateTime` as `/Date(...)/`.
