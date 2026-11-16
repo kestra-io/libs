@@ -12,11 +12,13 @@
 #' @export
 Kestra <- new.env(parent = emptyenv())
 
+# Kestra matches one line, and Java treats these as line terminators.
+line_terminators <- c("\u0085" = "\\u0085", "\u2028" = "\\u2028", "\u2029" = "\\u2029")
+
 Kestra$format <- function(map) {
   json <- jsonlite::toJSON(map, auto_unbox = TRUE, digits = NA, na = "null", null = "null", POSIXt = "ISO8601", UTC = TRUE)
-  # Kestra matches one line, and Java treats U+0085, U+2028 and U+2029 as line terminators.
-  for (char in c("\u0085", "\u2028", "\u2029")) {
-    json <- gsub(char, sprintf("\\u%04x", utf8ToInt(char)), json, fixed = TRUE)
+  for (char in names(line_terminators)) {
+    json <- gsub(char, line_terminators[[char]], json, fixed = TRUE)
   }
   paste0("::", json, "::")
 }
@@ -45,19 +47,19 @@ Kestra$timer <- function(name, duration, tags = NULL) {
   invisible(result)
 }
 
-Kestra$logger <- function() {
-  log_at <- function(level) {
-    function(...) send(list(logs = list(list(level = level, message = paste0(..., collapse = "")))))
-  }
-
-  list(
-    trace = log_at("TRACE"),
-    debug = log_at("DEBUG"),
-    info = log_at("INFO"),
-    warn = log_at("WARN"),
-    error = log_at("ERROR")
-  )
+log_at <- function(level) {
+  function(...) send(list(logs = list(list(level = level, message = paste0(..., collapse = "")))))
 }
+
+logger <- list(
+  trace = log_at("TRACE"),
+  debug = log_at("DEBUG"),
+  info = log_at("INFO"),
+  warn = log_at("WARN"),
+  error = log_at("ERROR")
+)
+
+Kestra$logger <- function() logger
 
 send <- function(map) {
   # Bytes as-is, so a non-UTF-8 locale cannot turn characters into <U+00E9> escapes.
