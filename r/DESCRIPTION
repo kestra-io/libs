@@ -5,7 +5,7 @@ Authors@R: person("Kestra", email = "hello@kestra.io", role = c("aut", "cre"))
 Description: Helpers for R scripts run by 'Kestra' script tasks. Each call
     prints one '::{...}::' line to stdout, which 'Kestra' reads as task
     outputs, metrics or logs.
-License: Apache License 2.0
+License: Apache License (== 2.0)
 URL: https://kestra.io, https://github.com/kestra-io/libs
 BugReports: https://github.com/kestra-io/libs/issues
 Encoding: UTF-8

@@ -13,6 +13,13 @@ test_that("multi-line strings and Java line terminators stay on one line", {
   expect_identical(line, '::{"outputs":{"text":"a\\nb\\u2028c\\u2029d\\u0085e"}}::')
 })
 
+test_that("date-times are sent in UTC and non-ASCII text round-trips", {
+  when <- as.POSIXct("2026-11-16 10:00:00", tz = "Europe/Paris")
+
+  expect_identical(emitted(Kestra$outputs(list(when = when))), '::{"outputs":{"when":"2026-11-16T09:00:00Z"}}::')
+  expect_identical(emitted(Kestra$outputs(list(name = "caf\u00e9"))), enc2utf8('::{"outputs":{"name":"caf\u00e9"}}::'))
+})
+
 test_that("outputs must be a named list", {
   expect_error(Kestra$outputs(list(1, 2)), "outputs must be a non-empty named list")
   expect_error(Kestra$outputs(list()), "outputs must be a non-empty named list")
@@ -26,6 +33,13 @@ test_that("metrics default to empty tags and accept named vectors as tags", {
   expect_identical(
     emitted(Kestra$gauge("queue", 3, c(env = "prod"))),
     '::{"metrics":[{"name":"queue","type":"gauge","value":3,"tags":{"env":"prod"}}]}::'
+  )
+})
+
+test_that("empty tags are allowed", {
+  expect_identical(
+    emitted(Kestra$counter("rows", 1, list())),
+    '::{"metrics":[{"name":"rows","type":"counter","value":1,"tags":{}}]}::'
   )
 })
 
@@ -53,4 +67,12 @@ test_that("logger emits the level and joins the message parts", {
     emitted(Kestra$logger()$warn("3 rows ", "had missing values")),
     '::{"logs":[{"level":"WARN","message":"3 rows had missing values"}]}::'
   )
+})
+
+test_that("logger always sends one string, even for vectors or no arguments", {
+  expect_identical(
+    emitted(Kestra$logger()$info("rows: ", c(1, 2))),
+    '::{"logs":[{"level":"INFO","message":"rows: 1rows: 2"}]}::'
+  )
+  expect_identical(emitted(Kestra$logger()$info()), '::{"logs":[{"level":"INFO","message":""}]}::')
 })

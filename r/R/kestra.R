@@ -13,7 +13,7 @@
 Kestra <- new.env(parent = emptyenv())
 
 Kestra$format <- function(map) {
-  json <- jsonlite::toJSON(map, auto_unbox = TRUE, digits = NA, na = "null", null = "null", POSIXt = "ISO8601")
+  json <- jsonlite::toJSON(map, auto_unbox = TRUE, digits = NA, na = "null", null = "null", POSIXt = "ISO8601", UTC = TRUE)
   # Kestra matches one line, and Java treats U+0085, U+2028 and U+2029 as line terminators.
   for (char in c("\u0085", "\u2028", "\u2029")) {
     json <- gsub(char, sprintf("\\u%04x", utf8ToInt(char)), json, fixed = TRUE)
@@ -39,15 +39,15 @@ Kestra$timer <- function(name, duration, tags = NULL) {
     return(send_metric(name, "timer", duration, tags))
   }
 
-  start <- Sys.time()
+  start <- proc.time()[["elapsed"]]
   result <- duration()
-  send_metric(name, "timer", as.numeric(difftime(Sys.time(), start, units = "secs")), tags)
+  send_metric(name, "timer", proc.time()[["elapsed"]] - start, tags)
   invisible(result)
 }
 
 Kestra$logger <- function() {
   log_at <- function(level) {
-    function(...) send(list(logs = list(list(level = level, message = paste0(...)))))
+    function(...) send(list(logs = list(list(level = level, message = paste0(..., collapse = "")))))
   }
 
   list(
@@ -60,7 +60,8 @@ Kestra$logger <- function() {
 }
 
 send <- function(map) {
-  writeLines(Kestra$format(map), con = stdout())
+  # Bytes as-is, so a non-UTF-8 locale cannot turn characters into <U+00E9> escapes.
+  writeLines(enc2utf8(Kestra$format(map)), con = stdout(), useBytes = TRUE)
   invisible(NULL)
 }
 
@@ -72,7 +73,7 @@ send_metric <- function(name, type, value, tags) {
     stop(sprintf("Metric '%s' value must be a single finite number.", name), call. = FALSE)
   }
 
-  tags <- if (is.null(tags)) structure(list(), names = character(0)) else as_object(tags, "tags")
+  tags <- if (length(tags) == 0) structure(list(), names = character(0)) else as_object(tags, "tags")
   send(list(metrics = list(list(name = name, type = type, value = value, tags = tags))))
 }
 

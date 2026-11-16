@@ -6,8 +6,10 @@ Send outputs, metrics and logs from R script tasks to Kestra. Each call prints o
 
 ```r
 install.packages("remotes")
-remotes::install_github("kestra-io/libs", subdir = "r")
+remotes::install_github("kestra-io/libs", subdir = "r", ref = "main")
 ```
+
+Pin `ref` to a release tag in production flows, so a push to `main` cannot change what runs. Installing on every execution calls the GitHub API (60 unauthenticated requests per hour per IP), so for frequent flows build an image with the package installed and set `containerImage`.
 
 ## Usage
 
@@ -19,7 +21,7 @@ tasks:
   - id: train
     type: io.kestra.plugin.scripts.r.Script
     beforeCommands:
-      - Rscript -e 'install.packages("remotes"); remotes::install_github("kestra-io/libs", subdir = "r")'
+      - Rscript -e 'install.packages("remotes"); remotes::install_github("kestra-io/libs", subdir = "r", ref = "main")'
     script: |
       library(kestra)
 
@@ -42,6 +44,6 @@ tasks:
 | `Kestra$timer(name, seconds_or_function, tags)` | Timer metric. A function is timed and its result returned |
 | `Kestra$logger()$trace/debug/info/warn/error(...)` | Log line at that level |
 
-`tags` is optional and must be named, as a list or a named vector.
+`tags` is optional and must be named, as a list or a named vector. Date-times are sent in UTC, for example `2026-11-16T09:00:00Z`.
 
 Length-1 vectors are written as single values. Wrap a value in `I()` to keep it as a JSON array, for example `list(ids = I(42))`.
