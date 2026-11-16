@@ -1,21 +1,17 @@
 Set-StrictMode -Version Latest
 
-function Format-KestraMessage {
-    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Message)
-
-    $json = ConvertTo-Json -InputObject $Message -Compress -Depth 100
-    # Kestra matches one line, and Java treats U+0085, U+2028 and U+2029 as line terminators.
-    foreach ($code in 0x85, 0x2028, 0x2029) {
-        $json = $json.Replace([string][char]$code, ('\u{0:x4}' -f $code))
-    }
-    '::' + $json + '::'
-}
+# Kestra matches one line, and Java treats these as line terminators.
+$LineTerminators = @{ ([string][char]0x85) = '\u0085'; ([string][char]0x2028) = '\u2028'; ([string][char]0x2029) = '\u2029' }
 
 # Written to the console, not the pipeline, so callers that capture function output do not swallow it.
 function Send-KestraMessage {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $Message)
 
-    [Console]::Out.WriteLine((Format-KestraMessage -Message $Message))
+    $json = ConvertTo-Json -InputObject $Message -Compress -Depth 100
+    foreach ($terminator in $LineTerminators.GetEnumerator()) {
+        $json = $json.Replace($terminator.Key, $terminator.Value)
+    }
+    [Console]::Out.WriteLine('::' + $json + '::')
 }
 
 # Accepts a hashtable or a PSCustomObject, as returned by ConvertFrom-Json, Invoke-RestMethod or Select-Object.
