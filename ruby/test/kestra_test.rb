@@ -1,6 +1,7 @@
 require "minitest/autorun"
 require "json"
 require "tmpdir"
+require "bigdecimal"
 require "kestra"
 
 class KestraTest < Minitest::Test
@@ -66,16 +67,56 @@ class KestraTest < Minitest::Test
   end
 
   def test_logger_maps_ruby_severities_to_kestra_levels
+    Kestra.instance_variable_set(:@logger, nil)
     lines = emitted do
-      logger = Logger.new($stdout, formatter: Kestra::LogFormatter.new)
-      logger.debug("caf\u00e9")
-      logger.warn("3 rows skipped")
-      logger.fatal("boom")
+      Kestra.logger.debug("caf\u00e9")
+      Kestra.logger.warn("3 rows skipped")
+      Kestra.logger.fatal("boom")
+      Kestra.logger.info("bad \xff byte")
     end
 
     assert_equal [%(::{"logs":[{"level":"DEBUG","message":"caf\u00e9"}]}::),
                   '::{"logs":[{"level":"WARN","message":"3 rows skipped"}]}::',
-                  '::{"logs":[{"level":"ERROR","message":"boom"}]}::'], lines
+                  '::{"logs":[{"level":"ERROR","message":"boom"}]}::',
+                  %(::{"logs":[{"level":"INFO","message":"bad \ufffd byte"}]}::)], lines
+  end
+
+  def test_logger_follows_stdout_when_it_is_replaced
+    Kestra.logger
+    assert_equal ['::{"logs":[{"level":"INFO","message":"later"}]}::'], emitted { Kestra.logger.info("later") }
+  end
+
+  def test_metric_values_are_numbers_and_tags_are_strings
+    lines = emitted do
+      Kestra.gauge("ratio", Rational(1, 4), tags: { shard: 2, primary: true })
+      Kestra.gauge("price", BigDecimal("1.5"))
+    end
+
+    assert_equal ['::{"metrics":[{"name":"ratio","type":"gauge","value":0.25,"tags":{"shard":"2","primary":"true"}}]}::',
+                  '::{"metrics":[{"name":"price","type":"gauge","value":1.5,"tags":{}}]}::'], lines
+    assert_raises(ArgumentError) { Kestra.gauge("queue", 1, tags: { a: [1] }) }
+    assert_raises(ArgumentError) { Kestra.gauge("queue", 1, tags: { a: nil }) }
+  end
+
+  def test_timer_is_sent_when_the_block_returns_early
+    timed = lambda do
+      Kestra.timer("early") { return 5 }
+      6
+    end
+    result = nil
+    lines = emitted { result = timed.call }
+
+    assert_equal 5, result
+    assert_equal "early", payload(lines.first)["metrics"].first["name"]
+  end
+
+  def test_concurrent_calls_write_whole_lines
+    lines = emitted do
+      8.times.map { |i| Thread.new { 200.times { Kestra.outputs(i: i) } } }.each(&:join)
+    end
+
+    assert_equal 1600, lines.size
+    lines.each { |line| payload(line) }
   end
 
   def test_assets_are_sent_as_given
@@ -90,14 +131,13 @@ class KestraTest < Minitest::Test
     Dir.mktmpdir do |dir|
       file = File.join(dir, "context.json")
       File.write(file, '{"labels":{"env":"prod"},"inputs":{"text":"a\\nb caf\\u00e9"}}')
-      saved = ENV.to_h.slice("KESTRA_EXECUTION_CONTEXT_FILE", "KESTRA_CONTEXT")
+      saved = %w[KESTRA_EXECUTION_CONTEXT_FILE KESTRA_CONTEXT].to_h { |key| [key, ENV.fetch(key, nil)] }
       ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = file
       ENV.delete("KESTRA_CONTEXT")
       Kestra.instance_variable_set(:@context_json, nil)
       yield file, dir
     ensure
-      ENV.delete("KESTRA_EXECUTION_CONTEXT_FILE")
-      ENV.update(saved)
+      saved.each { |key, value| ENV[key] = value }
       Kestra.instance_variable_set(:@context_json, nil)
     end
   end
@@ -128,6 +168,26 @@ class KestraTest < Minitest::Test
     with_context do |_file, dir|
       ENV["KESTRA_CONTEXT"] = ['{"vars":{"n":42}}'].pack("m0")
       assert_raises(Errno::ENOENT) { Kestra.context(File.join(dir, "typo.json")) }
+    end
+  end
+
+  def test_empty_file_variable_means_the_default_file
+    with_context do |file, dir|
+      ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = ""
+      Dir.chdir(dir) do
+        File.rename(file, Kestra::CONTEXT_FILE)
+        assert_equal "prod", Kestra.context["labels"]["env"]
+      end
+    end
+  end
+
+  def test_context_that_is_not_an_object_names_the_source
+    with_context do |file|
+      ["", "null", "[1]", "{"].each do |content|
+        File.write(file, content)
+        error = assert_raises(JSON::ParserError) { Kestra.context(file) }
+        assert_includes error.message, file
+      end
     end
   end
 

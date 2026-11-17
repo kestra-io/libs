@@ -47,4 +47,4 @@ tasks:
 | `Kestra.logger.debug/info/warn/error(message)` | Log line at that level. `fatal` is sent as ERROR |
 | `Kestra.context(path = nil)` | The execution context as a Hash, for example `Kestra.context["labels"]`. Needs `executionContext: true` on the task |
 
-`Kestra.logger` is a standard `Logger`, so it can be passed to any library that accepts one. Values are serialized with `JSON.generate`, so a `Time` is sent as its `to_s` string. Call `iso8601` first if a downstream task parses it.
+Metric tags are sent as strings, and invalid bytes in a log message become U+FFFD. `Kestra.logger` is a standard `Logger`, so it can be passed to any library that accepts one. Values are serialized with `JSON.generate`, so a `Time` is sent as its `to_s` string. Call `iso8601` first if a downstream task parses it.

@@ -54,14 +54,20 @@ module Kestra
       raise ArgumentError, "Timer '#{name}' takes either seconds or a block, not both." unless seconds.nil?
 
       start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      result = yield
-      send_metric(name, "timer", Process.clock_gettime(Process::CLOCK_MONOTONIC) - start, tags)
-      result
+      begin
+        yield
+      rescue Exception
+        raised = true
+        raise
+      ensure
+        # Also sent when the block leaves with return, break or throw.
+        send_metric(name, "timer", Process.clock_gettime(Process::CLOCK_MONOTONIC) - start, tags) unless raised
+      end
     end
 
     # A standard Logger, so it can be passed to any code that accepts one.
     def logger
-      @logger ||= Logger.new($stdout, formatter: LogFormatter.new)
+      @logger ||= Logger.new(Output, formatter: LogFormatter.new)
     end
 
     # The execution context as a Hash, read from path, KESTRA_EXECUTION_CONTEXT_FILE or .kestra-execution-context.json
@@ -70,7 +76,8 @@ module Kestra
     def context(path = nil)
       return JSON.parse(@context_json) if path.nil? && @context_json
 
-      file = path || ENV.fetch("KESTRA_EXECUTION_CONTEXT_FILE", CONTEXT_FILE)
+      env_file = ENV.fetch("KESTRA_EXECUTION_CONTEXT_FILE", "")
+      file = path || (env_file.empty? ? CONTEXT_FILE : env_file)
       encoded = ENV.fetch("KESTRA_CONTEXT", "")
       json = if File.file?(file)
                File.read(file, encoding: "UTF-8")
@@ -80,7 +87,14 @@ module Kestra
                raise Errno::ENOENT, "No Kestra execution context found: '#{file}' does not exist and the KESTRA_CONTEXT " \
                                     "environment variable is not set. The execution context is only available when the script runs inside a Kestra task."
              end
-      context = JSON.parse(json)
+      source = File.file?(file) ? file : "KESTRA_CONTEXT"
+      context = begin
+        JSON.parse(json)
+      rescue JSON::ParserError
+        nil
+      end
+      raise JSON::ParserError, "The execution context in #{source} is not a JSON object." unless context.is_a?(Hash)
+
       @context_json = json if path.nil?
       context
     end
@@ -88,7 +102,7 @@ module Kestra
     private
 
     def send_message(map)
-      $stdout.puts(format(map))
+      Output.write("#{format(map)}\n")
       nil
     end
 
@@ -99,13 +113,39 @@ module Kestra
       end
       raise ArgumentError, "Metric '#{name}' tags must be a Hash, for example tags: { env: \"prod\" }." unless tags.is_a?(Hash)
 
+      # JSON writes BigDecimal and Rational as strings, and Kestra reads tags as a map of strings.
+      value = value.to_f unless value.is_a?(Integer)
+      tags = tags.to_h do |key, tag|
+        if tag.nil? || tag.is_a?(Hash) || tag.is_a?(Array)
+          raise ArgumentError, "Metric '#{name}' tag '#{key}' must be a single value, for example tags: { env: \"prod\" }."
+        end
+
+        [key.to_s, tag.to_s]
+      end
       send_message(metrics: [{ name: name, type: type, value: value, tags: tags }])
     end
   end
 
+  # Writes to the current $stdout and flushes each line, so Kestra gets every line when it is written,
+  # not at exit, and lines from several threads never merge.
+  module Output
+    MUTEX = Mutex.new
+
+    def self.write(line)
+      MUTEX.synchronize do
+        $stdout.write(line)
+        $stdout.flush
+      end
+    end
+
+    def self.close; end
+  end
+
   class LogFormatter < Logger::Formatter
     def call(severity, _time, _progname, msg)
-      "#{Kestra.format(logs: [{ level: LEVELS.fetch(severity, severity), message: msg2str(msg) }])}\n"
+      # Invalid bytes become U+FFFD, so a log call never fails.
+      message = msg2str(msg).encode(Encoding::UTF_8, invalid: :replace, undef: :replace).scrub
+      "#{Kestra.format(logs: [{ level: LEVELS.fetch(severity, severity), message: message }])}\n"
     end
   end
 end
