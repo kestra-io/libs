@@ -22,3 +22,8 @@ python/.venv
 javascript/gradle.properties
 javascript/node_modules/*
 dist/
+
+### R
+r/*.Rcheck
+r/*.tar.gz
+r/.Rhistory

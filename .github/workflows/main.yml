@@ -104,6 +104,110 @@ jobs:
         run: npm publish --access public
 
 
+  r:
+    name: Check R package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      # The version comes from the release tag, like the Python and npm packages.
+      - name: Set version
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: r
+        run: |
+          sed -i "s/^Version: .*/Version: ${GITHUB_REF_NAME#v}/" DESCRIPTION
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r
+          extra-packages: any::rcmdcheck
+          needs: check
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          working-directory: r
+          args: 'c("--no-manual")'
+          error-on: '"warning"'
+
+  powershell:
+    name: Test PowerShell module (${{ matrix.shell }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            shell: pwsh
+          # Windows PowerShell 5.1, which the module supports
+          - os: windows-latest
+            shell: powershell
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+        working-directory: powershell
+    steps:
+      - uses: actions/checkout@v6
+
+      # The version comes from the release tag, like the Python and npm packages.
+      - name: Set version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $manifest = './Kestra/Kestra.psd1'
+          (Get-Content $manifest -Raw) -replace "ModuleVersion\s*=\s*'[^']*'", "ModuleVersion     = '$($env:GITHUB_REF_NAME.TrimStart('v'))'" | Set-Content $manifest -NoNewline
+
+      - name: Install test tools
+        run: |
+          Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser
+
+      - name: Lint
+        run: |
+          $issues = Invoke-ScriptAnalyzer -Path ./Kestra -Recurse -Severity Warning,Error
+          $issues | Format-Table -AutoSize
+          if ($issues) { exit 1 }
+
+      - name: Test
+        run: |
+          Import-Module Pester -RequiredVersion 5.7.1
+          Invoke-Pester -Path ./tests -CI
+
+  go:
+    name: Test Go module (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.21', 'stable']
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
   ruby:
     name: Test Ruby gem (${{ matrix.ruby }})
     runs-on: ubuntu-latest
@@ -138,6 +242,9 @@ jobs:
     needs:
       - pip
       - npm
+      - r
+      - powershell
+      - go
       - ruby
     steps:
       - name: Create Release
