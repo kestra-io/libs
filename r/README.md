@@ -1,6 +1,6 @@
 # kestra (R)
 
-Send outputs, metrics and logs from R script tasks to Kestra. Each call prints one `::{...}::` line to stdout, which Kestra reads. Depends only on `jsonlite`.
+Send outputs, metrics, logs and assets from R script tasks to Kestra, and read the execution context. Each call prints one `::{...}::` line to stdout, which Kestra reads. Depends only on `jsonlite`.
 
 ## Install
 
@@ -47,5 +47,7 @@ tasks:
 | `Kestra$context(path = NULL)` | The execution context as a list, for example `Kestra$context()$labels$env`. Needs `executionContext: true` on the task |
 
 `tags` is optional and must be named, as a list or a named vector. Date-times are sent in UTC, for example `2026-11-16T09:00:00Z`.
+
+Metric tags are sent as strings. Numbers keep 15 significant digits, so send larger integers such as byte counts as strings. Invalid UTF-8 bytes become U+FFFD.
 
 Length-1 vectors are written as single values. Wrap a value in `I()` to keep it as a JSON array, for example `list(ids = I(42))`.

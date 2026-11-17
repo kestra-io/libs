@@ -1,4 +1,9 @@
-emitted <- function(expr) capture.output(expr)
+# The package writes UTF-8 bytes, which capture.output() returns unmarked in a C locale.
+emitted <- function(expr) {
+  lines <- capture.output(expr)
+  Encoding(lines) <- "UTF-8"
+  lines
+}
 
 test_that("outputs are one line with unboxed scalars, full precision and nulls", {
   line <- emitted(Kestra$outputs(list(accuracy = 0.912345678, model = "glm", missing = NA, tags = I("a"))))
@@ -84,6 +89,26 @@ test_that("named vectors keep their names at any depth", {
   expect_identical(line, '::{"outputs":{"stats":{"mean":1.2,"sd":0.3},"top":{"a":1},"nested":{"q":{"p50":2}},"ids":[1,2]}}::')
 })
 
+test_that("POSIXlt keeps its time zone and invalid UTF-8 becomes U+FFFD", {
+  when <- as.POSIXlt("2026-11-16 10:00:00", tz = "Europe/Paris")
+
+  expect_identical(emitted(Kestra$outputs(list(when = when))), '::{"outputs":{"when":"2026-11-16T09:00:00Z"}}::')
+  expect_identical(emitted(Kestra$outputs(list(name = "caf\xe9"))), enc2utf8('::{"outputs":{"name":"caf\ufffd"}}::'))
+})
+
+test_that("metric values are plain numbers and tags are strings", {
+  line <- emitted(Kestra$gauge("p95", quantile(c(1, 5, 9), 0.95), list(shard = 2, primary = TRUE)))
+  expect_identical(line, '::{"metrics":[{"name":"p95","type":"gauge","value":8.6,"tags":{"shard":"2","primary":"TRUE"}}]}::')
+
+  expect_identical(
+    emitted(Kestra$timer("fit", as.difftime(2, units = "mins"))),
+    '::{"metrics":[{"name":"fit","type":"timer","value":120,"tags":{}}]}::'
+  )
+  expect_error(Kestra$gauge("q", 1, list(env = c("a", "b"))), "tag 'env' must be a single value")
+  expect_error(Kestra$gauge("q", 1, list(env = NA)), "tag 'env' must be a single value")
+  expect_error(Kestra$gauge("q", 1, list(env = list(a = 1))), "tag 'env' must be a single value")
+})
+
 test_that("assets are sent as a named list", {
   line <- emitted(Kestra$assets(list(
     inputs = list(list(id = "raw.orders")),
@@ -140,6 +165,27 @@ test_that("an explicit path never falls back to KESTRA_CONTEXT", {
     Sys.setenv(KESTRA_CONTEXT = jsonlite::base64_enc('{"vars":{"n":42}}'))
     expect_error(Kestra$context(tempfile()), "No Kestra execution context found")
   })
+})
+
+test_that("an empty KESTRA_EXECUTION_CONTEXT_FILE means the default file", {
+  with_context_file(function(file) {
+    dir <- tempfile()
+    dir.create(dir)
+    file.copy(file, file.path(dir, ".kestra-execution-context.json"))
+    Sys.setenv(KESTRA_EXECUTION_CONTEXT_FILE = "")
+    old <- setwd(dir)
+    on.exit(setwd(old), add = TRUE)
+
+    expect_identical(Kestra$context()$labels$env, "prod")
+  })
+})
+
+test_that("a context that is not a JSON object names the source", {
+  for (content in c("", "null", "[1]", "{")) {
+    file <- tempfile()
+    writeChar(content, file, eos = NULL)
+    expect_error(Kestra$context(file), file, fixed = TRUE)
+  }
 })
 
 test_that("the context fails clearly outside Kestra", {
