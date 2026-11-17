@@ -66,9 +66,9 @@ module Kestra
 
     # The execution context as a Hash, read from path, KESTRA_EXECUTION_CONTEXT_FILE or .kestra-execution-context.json
     # (written when the task sets executionContext: true). Without a path, falls back to the base64 KESTRA_CONTEXT variable.
-    # The default context is read once. Raises Errno::ENOENT outside a Kestra task.
+    # The default context is read once, and each call returns a new Hash the caller may change. Raises Errno::ENOENT outside a Kestra task.
     def context(path = nil)
-      return @context if path.nil? && @context
+      return JSON.parse(@context_json) if path.nil? && @context_json
 
       file = path || ENV.fetch("KESTRA_EXECUTION_CONTEXT_FILE", CONTEXT_FILE)
       encoded = ENV.fetch("KESTRA_CONTEXT", "")
@@ -81,7 +81,7 @@ module Kestra
                                     "environment variable is not set. The execution context is only available when the script runs inside a Kestra task."
              end
       context = JSON.parse(json)
-      @context = context if path.nil?
+      @context_json = json if path.nil?
       context
     end
 

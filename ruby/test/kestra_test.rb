@@ -93,12 +93,12 @@ class KestraTest < Minitest::Test
       saved = ENV.to_h.slice("KESTRA_EXECUTION_CONTEXT_FILE", "KESTRA_CONTEXT")
       ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = file
       ENV.delete("KESTRA_CONTEXT")
-      Kestra.instance_variable_set(:@context, nil)
+      Kestra.instance_variable_set(:@context_json, nil)
       yield file, dir
     ensure
       ENV.delete("KESTRA_EXECUTION_CONTEXT_FILE")
       ENV.update(saved)
-      Kestra.instance_variable_set(:@context, nil)
+      Kestra.instance_variable_set(:@context_json, nil)
     end
   end
 
@@ -109,7 +109,8 @@ class KestraTest < Minitest::Test
       assert_equal "a\nb caf\u00e9", context["inputs"]["text"]
 
       File.delete(file)
-      assert_same context, Kestra.context
+      context["labels"]["env"] = "changed"
+      assert_equal "prod", Kestra.context["labels"]["env"]
     end
   end
 
