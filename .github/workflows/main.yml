@@ -208,6 +208,33 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+  ruby:
+    name: Test Ruby gem (${{ matrix.ruby }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ['2.7', '3.4']
+    defaults:
+      run:
+        working-directory: ruby
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+
+      - name: Test
+        run: ruby -w -Ilib test/kestra_test.rb
+
+      - name: Build gem
+        env:
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
+        run: gem build kestra.gemspec
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -218,6 +245,7 @@ jobs:
       - r
       - powershell
       - go
+      - ruby
     steps:
       - name: Create Release
         uses: actions/create-release@v1
