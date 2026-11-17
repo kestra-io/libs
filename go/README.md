@@ -1,6 +1,6 @@
 # kestra (Go)
 
-Send outputs, metrics and logs from Go script tasks to Kestra. Each call prints one `::{...}::` line to stdout, which Kestra reads. Standard library only, Go 1.21+.
+Send outputs, metrics, logs and assets from Go script tasks to Kestra. Each call prints one `::{...}::` line to stdout, which Kestra reads. Standard library only, Go 1.21+.
 
 ## Install
 
@@ -51,9 +51,11 @@ tasks:
 | Call | Result in Kestra |
 |------|------------------|
 | `kestra.Outputs(map[string]any)` | Task outputs under `outputs.<task>.vars` |
+| `kestra.Assets(map[string]any{"inputs": ..., "outputs": ...})` | Input and output assets of the task |
 | `kestra.Counter(name, value, tags)` | Counter metric |
 | `kestra.Gauge(name, value, tags)` | Gauge metric |
 | `kestra.Timer(name, duration, tags)` | Timer metric |
 | `kestra.Logger().Debug/Info/Warn/Error(msg, args...)` | Log line at that level, attributes appended as `key=value` |
+| `kestra.Context()` or `kestra.LoadContext(path)` | The execution context as a map, read once by `Context()`. Needs `executionContext: true` on the task |
 
 `tags` may be nil. Every call returns an error for invalid input, for example empty outputs or a NaN metric. `kestra.Logger()` is a standard `*slog.Logger`, so `slog.SetDefault(kestra.Logger())` sends all `slog` logging to Kestra. Calls are safe from several goroutines.

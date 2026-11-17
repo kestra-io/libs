@@ -1,8 +1,8 @@
 package kestra
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"math"
@@ -70,6 +70,23 @@ func TestInvalidOutputsReturnAnError(t *testing.T) {
 	}
 	if err := Outputs(map[string]any{"bad": math.NaN()}); err == nil {
 		t.Fatal("NaN output: want an error")
+	}
+}
+
+func TestAssets(t *testing.T) {
+	lines := capture(t, func() {
+		must(t, Assets(map[string]any{
+			"inputs":  []map[string]any{{"id": "raw.orders"}},
+			"outputs": []map[string]any{{"id": "sales.orders", "type": "TABLE", "metadata": map[string]string{"owner": "team_a"}}},
+		}))
+	})
+
+	want := `::{"assets":{"inputs":[{"id":"raw.orders"}],"outputs":[{"id":"sales.orders","metadata":{"owner":"team_a"},"type":"TABLE"}]}}::`
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("got %q, want %q", lines, want)
+	}
+	if err := Assets(nil); err == nil {
+		t.Fatal("empty assets: want an error")
 	}
 }
 

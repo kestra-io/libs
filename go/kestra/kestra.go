@@ -1,5 +1,5 @@
-// Package kestra sends outputs, metrics and logs from Go script tasks to Kestra.
-// Each call prints one `::{...}::` line to stdout, which Kestra parses.
+// Package kestra sends outputs, metrics, logs and assets from Go script tasks to Kestra, and reads the execution context.
+// Each send call prints one `::{...}::` line to stdout, which Kestra parses.
 package kestra
 
 import (
@@ -28,6 +28,15 @@ func Outputs(outputs map[string]any) error {
 		return errors.New("kestra: outputs must contain at least one key, for example map[string]any{\"rows\": 42}")
 	}
 	return send(map[string]any{"outputs": outputs})
+}
+
+// Assets declares the task's input and output assets,
+// for example map[string]any{"outputs": []map[string]any{{"id": "sales.orders", "type": "TABLE"}}}.
+func Assets(assets map[string]any) error {
+	if len(assets) == 0 {
+		return errors.New("kestra: assets must contain inputs or outputs")
+	}
+	return send(map[string]any{"assets": assets})
 }
 
 // Counter sends a counter metric. tags may be nil.
