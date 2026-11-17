@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
 $ContextFile = '.kestra-execution-context.json'
-$Context = $null
+$ContextJson = $null
 
 # Written to the console, not the pipeline, so callers that capture function output do not swallow it.
 function Send-KestraMessage {
@@ -175,7 +175,7 @@ function Write-KestraLog {
 function Get-KestraContext {
     <#
     .SYNOPSIS
-    Returns the execution context (labels, inputs, vars, trigger, outputs of earlier tasks), loaded once and cached.
+    Returns the execution context (labels, inputs, vars, trigger, outputs of earlier tasks), read once. Each call returns a new object the caller may change.
     .DESCRIPTION
     Reads -Path, then $env:KESTRA_EXECUTION_CONTEXT_FILE, then .kestra-execution-context.json, which the task writes when executionContext is true.
     Without -Path, falls back to the base64-encoded $env:KESTRA_CONTEXT. Throws System.IO.FileNotFoundException outside a Kestra task.
@@ -185,8 +185,8 @@ function Get-KestraContext {
     [CmdletBinding()]
     param([string] $Path)
 
-    if (-not $Path -and $null -ne $script:Context) {
-        return $script:Context
+    if (-not $Path -and $null -ne $script:ContextJson) {
+        return ConvertFrom-Json -InputObject $script:ContextJson
     }
 
     $file = if ($Path) { $Path } elseif ($env:KESTRA_EXECUTION_CONTEXT_FILE) { $env:KESTRA_EXECUTION_CONTEXT_FILE } else { $ContextFile }
@@ -200,7 +200,7 @@ function Get-KestraContext {
 
     $context = ConvertFrom-Json -InputObject $json
     if (-not $Path) {
-        $script:Context = $context
+        $script:ContextJson = $json
     }
     $context
 }

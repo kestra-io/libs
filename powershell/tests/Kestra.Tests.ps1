@@ -167,7 +167,7 @@ Describe 'Send-KestraAsset' {
 
 Describe 'Get-KestraContext' {
     BeforeEach {
-        & (Get-Module Kestra) { $script:Context = $null }
+        & (Get-Module Kestra) { $script:ContextJson = $null }
         $json = '{"labels": {"env": "prod"}, "inputs": {"text": "a\nb"}, "trigger": {"startDate": "2025-01-01T00:00:00Z"}}'
         $file = Join-Path $TestDrive 'context.json'
         Set-Content -LiteralPath $file -Value $json -Encoding UTF8
@@ -188,11 +188,12 @@ Describe 'Get-KestraContext' {
         $context.trigger.startDate | Should -Not -BeNullOrEmpty
     }
 
-    It 'loads the context once' {
+    It 'reads the context once and returns a new object per call' {
         $first = Get-KestraContext
         Remove-Item -LiteralPath $env:KESTRA_EXECUTION_CONTEXT_FILE
+        $first.labels.env = 'changed'
 
-        Get-KestraContext | Should -Be $first
+        (Get-KestraContext).labels.env | Should -Be 'prod'
     }
 
     It 'reads an explicit path' {
