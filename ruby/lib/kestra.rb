@@ -81,6 +81,8 @@ module Kestra
                File.read(file, encoding: "UTF-8")
              elsif path.nil? && !encoded.empty?
                encoded.unpack1("m").force_encoding("UTF-8")
+             elsif path
+               raise Errno::ENOENT, "Kestra execution context file '#{file}' does not exist."
              else
                raise Errno::ENOENT, "No Kestra execution context found: '#{file}' does not exist and the KESTRA_CONTEXT " \
                                     "environment variable is not set. The execution context is only available when the script runs inside a Kestra task."
@@ -144,8 +146,11 @@ module Kestra
 
   class LogFormatter < Logger::Formatter
     def call(severity, _time, _progname, msg)
+      # Binary strings (Net::HTTP bodies, File.binread) usually hold UTF-8, so read them as UTF-8.
       # Invalid bytes become U+FFFD, so a log call never fails.
-      message = msg2str(msg).encode(Encoding::UTF_8, invalid: :replace, undef: :replace).scrub
+      message = msg2str(msg)
+      message = message.dup.force_encoding(Encoding::UTF_8) if message.encoding == Encoding::BINARY
+      message = message.encode(Encoding::UTF_8, invalid: :replace, undef: :replace).scrub
       "#{Kestra.format(logs: [{ level: LEVELS.fetch(severity, severity), message: message }])}\n"
     end
   end

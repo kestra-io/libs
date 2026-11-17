@@ -79,12 +79,14 @@ class KestraTest < Minitest::Test
       Kestra.logger.warn("3 rows skipped")
       Kestra.logger.fatal("boom")
       Kestra.logger.info("bad \xff byte")
+      Kestra.logger.info("caf\xC3\xA9".b)
     end
 
     assert_equal [%(::{"logs":[{"level":"DEBUG","message":"caf\u00e9"}]}::),
                   '::{"logs":[{"level":"WARN","message":"3 rows skipped"}]}::',
                   '::{"logs":[{"level":"ERROR","message":"boom"}]}::',
-                  %(::{"logs":[{"level":"INFO","message":"bad \ufffd byte"}]}::)], lines
+                  %(::{"logs":[{"level":"INFO","message":"bad \ufffd byte"}]}::),
+                  %(::{"logs":[{"level":"INFO","message":"caf\u00e9"}]}::)], lines
   end
 
   def test_logger_follows_stdout_when_it_is_replaced
@@ -173,7 +175,9 @@ class KestraTest < Minitest::Test
   def test_explicit_path_never_falls_back_to_the_variable
     with_context do |_file, dir|
       ENV["KESTRA_CONTEXT"] = ['{"vars":{"n":42}}'].pack("m0")
-      assert_raises(Errno::ENOENT) { Kestra.context(File.join(dir, "typo.json")) }
+      error = assert_raises(Errno::ENOENT) { Kestra.context(File.join(dir, "typo.json")) }
+      assert_includes error.message, "typo.json"
+      refute_includes error.message, "KESTRA_CONTEXT"
     end
   end
 
