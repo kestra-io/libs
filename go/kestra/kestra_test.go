@@ -166,3 +166,30 @@ func TestConcurrentCallsWriteWholeLines(t *testing.T) {
 		payload(t, line)
 	}
 }
+
+type loggingError struct{}
+
+func (loggingError) Error() string {
+	Logger().Warn("inner")
+	return "boom"
+}
+
+func TestLoggingFromAnAttributeDoesNotDeadlock(t *testing.T) {
+	done := make(chan []string)
+	go func() {
+		done <- capture(t, func() { Logger().Error("outer", "err", loggingError{}) })
+	}()
+
+	select {
+	case lines := <-done:
+		want := []string{
+			`::{"logs":[{"level":"WARN","message":"inner"}]}::`,
+			`::{"logs":[{"level":"ERROR","message":"outer err=boom"}]}::`,
+		}
+		if strings.Join(lines, "\n") != strings.Join(want, "\n") {
+			t.Fatalf("got %q", lines)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadlock: a log call made while rendering an attribute never returned")
+	}
+}

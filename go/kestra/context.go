@@ -43,6 +43,7 @@ func LoadContext(path string) (map[string]any, error) {
 	return decodeContext(data)
 }
 
+// readContext returns the context bytes, already checked to be a JSON object.
 func readContext(path string) ([]byte, error) {
 	isExplicit := path != ""
 	if !isExplicit {
@@ -52,6 +53,7 @@ func readContext(path string) ([]byte, error) {
 		path = contextFile
 	}
 
+	source := path
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) && !isExplicit {
 		encoded := os.Getenv("KESTRA_CONTEXT")
@@ -59,10 +61,14 @@ func readContext(path string) ([]byte, error) {
 			return nil, fmt.Errorf("kestra: no execution context found: %q does not exist and the KESTRA_CONTEXT "+
 				"environment variable is not set, the execution context is only available inside a Kestra task: %w", path, fs.ErrNotExist)
 		}
+		source = "KESTRA_CONTEXT"
 		data, err = base64.StdEncoding.DecodeString(encoded)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("kestra: read execution context: %w", err)
+		return nil, fmt.Errorf("kestra: read execution context from %s: %w", source, err)
+	}
+	if _, err := decodeContext(data); err != nil {
+		return nil, fmt.Errorf("kestra: execution context in %s is not a JSON object: %w", source, err)
 	}
 	return data, nil
 }
@@ -70,7 +76,10 @@ func readContext(path string) ([]byte, error) {
 func decodeContext(data []byte) (map[string]any, error) {
 	var context map[string]any
 	if err := json.Unmarshal(data, &context); err != nil {
-		return nil, fmt.Errorf("kestra: parse execution context: %w", err)
+		return nil, err
+	}
+	if context == nil {
+		return nil, errors.New("got null")
 	}
 	return context, nil
 }

@@ -63,16 +63,22 @@ jobs:
           git config user.email "actions@github.com"
           git config user.name "tag-versioning-wf"
 
-          # Check remote
-          if git ls-remote --tags origin "${NEW_KESTRA_VER}" | grep -q "${NEW_KESTRA_VER}"; then
-            echo "Tag ${NEW_KESTRA_VER} already exists on remote. Nothing to do."
+          # Go resolves the module in go/ only from tags prefixed with its directory.
+          # Each tag is checked exactly, so a rerun creates whichever one a failed run left out.
+          TAGS=()
+          for TAG in "${NEW_KESTRA_VER}" "go/${NEW_KESTRA_VER}"; do
+            if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+              echo "Tag ${TAG} already exists on remote."
+            else
+              git tag -a "${TAG}" -m "Automated tag for: ${TAG}"
+              TAGS+=("${TAG}")
+            fi
+          done
+
+          if [ "${#TAGS[@]}" -eq 0 ]; then
+            echo "Nothing to do."
             exit 0
           fi
+          git push --atomic origin "${TAGS[@]}"
 
-          # Create annotated tags at current HEAD and push them.
-          # Go resolves the module in go/ only from tags prefixed with its directory.
-          git tag -a "${NEW_KESTRA_VER}" -m "Automated tag for: ${NEW_KESTRA_VER}"
-          git tag -a "go/${NEW_KESTRA_VER}" -m "Automated tag for: go/${NEW_KESTRA_VER}"
-          git push origin "${NEW_KESTRA_VER}" "go/${NEW_KESTRA_VER}"
-
-          echo "Tag ${NEW_KESTRA_VER} created and pushed."
+          echo "Pushed ${TAGS[*]}."

@@ -72,6 +72,18 @@ func TestLoadContextDoesNotFallBackForAnExplicitPath(t *testing.T) {
 	}
 }
 
+func TestContextThatIsNotAnObjectNamesTheSource(t *testing.T) {
+	for _, content := range []string{"", "null", "[1]", "{"} {
+		file := filepath.Join(t.TempDir(), "context.json")
+		must(t, os.WriteFile(file, []byte(content), 0o600))
+
+		_, err := LoadContext(file)
+		if err == nil || !strings.Contains(err.Error(), file) {
+			t.Errorf("content %q: got %v, want an error naming %s", content, err, file)
+		}
+	}
+}
+
 func TestContextFailsClearlyOutsideKestra(t *testing.T) {
 	withContextFile(t)
 	t.Setenv("KESTRA_EXECUTION_CONTEXT_FILE", filepath.Join(t.TempDir(), "missing.json"))
