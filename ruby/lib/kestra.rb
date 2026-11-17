@@ -104,6 +104,9 @@ module Kestra
     def send_message(map)
       Output.write("#{format(map)}\n")
       nil
+    rescue JSON::GeneratorError => e
+      raise ArgumentError, "This value cannot be sent to Kestra as JSON (#{e.message}). Replace NaN and Infinity with nil, " \
+                           "and make strings valid UTF-8, for example with String#scrub."
     end
 
     def send_metric(name, type, value, tags)

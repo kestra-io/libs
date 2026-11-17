@@ -30,6 +30,12 @@ class KestraTest < Minitest::Test
     assert_equal text, payload(lines.first)["outputs"]["text"]
   end
 
+  def test_values_json_cannot_encode_fail_with_a_plain_sentence
+    error = assert_raises(ArgumentError) { Kestra.outputs(score: Float::NAN) }
+    assert_match(/cannot be sent to Kestra as JSON.*Replace NaN and Infinity with nil/, error.message)
+    assert_raises(ArgumentError) { Kestra.outputs(body: "bad \xff") }
+  end
+
   def test_outputs_must_be_a_non_empty_hash
     assert_raises(ArgumentError) { Kestra.outputs({}) }
     assert_raises(ArgumentError) { Kestra.outputs([1, 2]) }
