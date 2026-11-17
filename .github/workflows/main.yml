@@ -125,6 +125,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # The version comes from the release tag, like the Python and npm packages.
+      - name: Set version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $manifest = './Kestra/Kestra.psd1'
+          (Get-Content $manifest -Raw) -replace "ModuleVersion\s*=\s*'[^']*'", "ModuleVersion     = '$($env:GITHUB_REF_NAME.TrimStart('v'))'" | Set-Content $manifest -NoNewline
+
       - name: Install test tools
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck

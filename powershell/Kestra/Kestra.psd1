@@ -1,6 +1,6 @@
 @{
     RootModule        = 'Kestra.psm1'
-    ModuleVersion     = '0.1.0'
+    ModuleVersion     = '0.0.0'
     GUID              = '59470a79-66a9-439a-a9d1-def189dde1f0'
     Author            = 'Kestra'
     CompanyName       = 'Kestra Technologies'
