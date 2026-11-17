@@ -27,23 +27,37 @@ function ConvertTo-KestraMap {
         }
         return $map
     }
-    throw [System.ArgumentException]::new("$What must be a hashtable or a PSCustomObject, for example @{ rows = 42 }.")
+    throw [System.ArgumentException]::new("$What must be a hashtable or a PSCustomObject, for example @{ key = 'value' }.")
 }
 
 function Send-KestraMetric {
     param(
         [string] $Name,
         [string] $Type,
-        [double] $Value,
+        [object] $Value,
         [object] $Tags
     )
 
-    if ([double]::IsNaN($Value) -or [double]::IsInfinity($Value)) {
+    # Typed as object, since a [double] parameter turns $null into 0 before any check runs.
+    $number = if ($Value -isnot [bool]) { $Value -as [double] }
+    if ($null -eq $number -or [double]::IsNaN($number) -or [double]::IsInfinity($number)) {
         throw [System.ArgumentException]::new("Metric '$Name' value must be a finite number.")
     }
-    $Tags = if ($null -eq $Tags) { @{} } else { ConvertTo-KestraMap -InputObject $Tags -What 'Tags' }
 
-    $metric = [ordered]@{ name = $Name; type = $Type; value = $Value; tags = $Tags }
+    # Kestra reads tags as a map of strings.
+    $stringTags = [ordered]@{}
+    if ($null -ne $Tags) {
+        $map = ConvertTo-KestraMap -InputObject $Tags -What 'Tags'
+        foreach ($key in $map.Keys) {
+            $tag = $map[$key]
+            if ($null -eq $tag -or ($tag -isnot [string] -and $tag -is [System.Collections.IEnumerable]) -or $tag -is [System.Management.Automation.PSCustomObject]) {
+                throw [System.ArgumentException]::new("Metric '$Name' tag '$key' must be a single value, for example @{ env = 'prod' }.")
+            }
+            $stringTags[[string]$key] = [string]$tag
+        }
+    }
+
+    $metric = [ordered]@{ name = $Name; type = $Type; value = $number; tags = $stringTags }
     Send-KestraMessage -Message @{ metrics = @($metric) }
 }
 
@@ -61,7 +75,8 @@ function Send-KestraOutput {
 
     process {
         $map = ConvertTo-KestraMap -InputObject $Outputs -What 'Outputs'
-        if ($map.Count -eq 0) {
+        # get_Count(), since $map.Count reads a key named count.
+        if ($map.get_Count() -eq 0) {
             throw [System.ArgumentException]::new('Outputs must contain at least one key, for example @{ rows = 42 }.')
         }
         Send-KestraMessage -Message @{ outputs = $map }
@@ -80,7 +95,7 @@ function Send-KestraAsset {
 
     process {
         $map = ConvertTo-KestraMap -InputObject $Assets -What 'Assets'
-        if ($map.Count -eq 0) {
+        if ($map.get_Count() -eq 0) {
             throw [System.ArgumentException]::new('Assets must contain inputs or outputs, for example @{ outputs = @(@{ id = ''sales.orders''; type = ''TABLE'' }) }.')
         }
         Send-KestraMessage -Message @{ assets = $map }
@@ -97,7 +112,7 @@ function Send-KestraCounter {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateNotNullOrEmpty()] [string] $Name,
-        [Parameter(Mandatory, Position = 1)] [double] $Value,
+        [Parameter(Mandatory, Position = 1)] [object] $Value,
         [Parameter(Position = 2)] [object] $Tags
     )
 
@@ -114,7 +129,7 @@ function Send-KestraGauge {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateNotNullOrEmpty()] [string] $Name,
-        [Parameter(Mandatory, Position = 1)] [double] $Value,
+        [Parameter(Mandatory, Position = 1)] [object] $Value,
         [Parameter(Position = 2)] [object] $Tags
     )
 
@@ -135,7 +150,7 @@ function Send-KestraTimer {
     [CmdletBinding(DefaultParameterSetName = 'Seconds')]
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateNotNullOrEmpty()] [string] $Name,
-        [Parameter(Mandatory, Position = 1, ParameterSetName = 'Seconds')] [double] $Seconds,
+        [Parameter(Mandatory, Position = 1, ParameterSetName = 'Seconds')] [object] $Seconds,
         [Parameter(Mandatory, ParameterSetName = 'ScriptBlock')] [scriptblock] $ScriptBlock,
         [Parameter(Position = 2)] [object] $Tags
     )
@@ -163,11 +178,14 @@ function Write-KestraLog {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateSet('Trace', 'Debug', 'Info', 'Warn', 'Error')] [string] $Level,
-        [Parameter(Mandatory, Position = 1, ValueFromPipeline, ValueFromRemainingArguments)] [AllowEmptyString()] [string[]] $Message
+        [Parameter(Mandatory, Position = 1, ValueFromPipeline, ValueFromRemainingArguments)] [AllowNull()] [AllowEmptyString()] [AllowEmptyCollection()] [string[]] $Message
     )
 
     process {
-        $logs = @(foreach ($line in $Message) { [ordered]@{ level = $Level.ToUpperInvariant(); message = $line } })
+        if ($null -eq $Message) {
+            $Message = ''
+        }
+        $logs = @(foreach ($line in $Message) { [ordered]@{ level = $Level.ToUpperInvariant(); message = [string]$line } })
         Send-KestraMessage -Message @{ logs = $logs }
     }
 }
@@ -198,7 +216,11 @@ function Get-KestraContext {
         throw [System.IO.FileNotFoundException]::new("No Kestra execution context found: '$file' does not exist and the KESTRA_CONTEXT environment variable is not set. The execution context is only available when the script runs inside a Kestra task.", $file)
     }
 
-    $context = ConvertFrom-Json -InputObject $json
+    $source = if (Test-Path -LiteralPath $file -PathType Leaf) { $file } else { 'KESTRA_CONTEXT' }
+    $context = try { ConvertFrom-Json -InputObject $json -ErrorAction Stop } catch { $null }
+    if ($context -isnot [System.Management.Automation.PSCustomObject]) {
+        throw [System.IO.InvalidDataException]::new("The execution context in $source is not a JSON object.")
+    }
     if (-not $Path) {
         $script:ContextJson = $json
     }

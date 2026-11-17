@@ -45,7 +45,7 @@ tasks:
 | `Write-KestraLog <Trace\|Debug\|Info\|Warn\|Error> <message...>` | One log line per message, at that level. Also takes pipeline input |
 | `Get-KestraContext [-Path <file>]` | The execution context, for example `(Get-KestraContext).labels.env`. Needs `executionContext: true` on the task |
 
-In a `catch` block, send the whole error with `Write-KestraLog Error ($_ | Out-String)`.
+In a `catch` block, send the whole error with `Write-KestraLog Error ($_ | Out-String)`. Metric tags are sent as strings. On pwsh 7, `Get-KestraContext` turns ISO date strings into `DateTime` values, while Windows PowerShell 5.1 keeps them as strings.
 
 The commands write straight to the console, so `$x = Send-KestraOutput ...` or calls inside a function whose output is captured still reach Kestra.
 

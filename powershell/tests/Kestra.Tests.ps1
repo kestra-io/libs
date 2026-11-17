@@ -63,6 +63,11 @@ Describe 'Send-KestraOutput' {
         (ConvertFrom-Emitted $line).outputs.name | Should -BeExactly $name
     }
 
+    It 'counts keys correctly when one of them is named count' {
+        Get-Emitted { Send-KestraOutput @{ count = 0 } } | Should -BeExactly '::{"outputs":{"count":0}}::'
+        Get-Emitted { 'count,ok', '0,1' | ConvertFrom-Csv | Send-KestraOutput } | Should -BeExactly '::{"outputs":{"count":"0","ok":"1"}}::'
+    }
+
     It 'takes outputs from the pipeline' {
         Get-Emitted { '{"rows": 1}' | ConvertFrom-Json | Send-KestraOutput } |
             Should -BeExactly '::{"outputs":{"rows":1}}::'
@@ -99,6 +104,23 @@ Describe 'metrics' {
 
         $gauge.tags.env | Should -Be 'prod'
         $timer.tags.env | Should -Be 'prod'
+    }
+
+    It 'sends tag values as strings and rejects nested or null ones' {
+        $metric = (ConvertFrom-Emitted (Get-Emitted { Send-KestraGauge queue 3 ([ordered]@{ shard = 2; ok = $true }) })).metrics[0]
+
+        $metric.tags.shard | Should -BeExactly '2'
+        $metric.tags.ok | Should -BeExactly 'True'
+        { Send-KestraGauge queue 3 @{ shard = @{ a = 1 } } } | Should -Throw "*tag 'shard' must be a single value*"
+        { Send-KestraGauge queue 3 @{ shard = @(1, 2) } } | Should -Throw "*tag 'shard' must be a single value*"
+        { Send-KestraGauge queue 3 @{ shard = $null } } | Should -Throw "*tag 'shard' must be a single value*"
+    }
+
+    It 'rejects a missing or non-numeric value instead of sending 0' {
+        { Send-KestraCounter rows $null } | Should -Throw
+        { Send-KestraCounter rows $true } | Should -Throw "*must be a finite number*"
+        { Send-KestraCounter rows 'many' } | Should -Throw "*must be a finite number*"
+        (ConvertFrom-Emitted (Get-Emitted { Send-KestraCounter rows '3' })).metrics[0].value | Should -Be 3
     }
 
     It 'rejects non-finite values and empty names' {
@@ -143,6 +165,11 @@ Describe 'Write-KestraLog' {
             Should -BeExactly '::{"logs":[{"level":"INFO","message":"a"},{"level":"INFO","message":"b"}]}::'
         @(Get-Emitted { 'a', 'b' | Write-KestraLog Error }) |
             Should -BeExactly @('::{"logs":[{"level":"ERROR","message":"a"}]}::', '::{"logs":[{"level":"ERROR","message":"b"}]}::')
+    }
+
+    It 'sends an empty message for $null, from arguments or the pipeline' {
+        @(Get-Emitted { 'a', $null | Write-KestraLog Info }) |
+            Should -BeExactly @('::{"logs":[{"level":"INFO","message":"a"}]}::', '::{"logs":[{"level":"INFO","message":""}]}::')
     }
 
     It 'rejects unknown levels' {
@@ -211,6 +238,14 @@ Describe 'Get-KestraContext' {
         $env:KESTRA_CONTEXT = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"vars": {"n": 42}}'))
 
         { Get-KestraContext -Path (Join-Path $TestDrive 'typo.json') } | Should -Throw -ExceptionType ([System.IO.FileNotFoundException])
+    }
+
+    It 'names the source when the context is not a JSON object' {
+        foreach ($content in '', '  ', 'null', '[1]', '{') {
+            Set-Content -LiteralPath $env:KESTRA_EXECUTION_CONTEXT_FILE -Value $content -NoNewline
+            { Get-KestraContext -Path $env:KESTRA_EXECUTION_CONTEXT_FILE } |
+                Should -Throw -ExceptionType ([System.IO.InvalidDataException]) -ExpectedMessage "*$($env:KESTRA_EXECUTION_CONTEXT_FILE)*"
+        }
     }
 
     It 'throws FileNotFoundException outside a Kestra task' {
