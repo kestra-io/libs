@@ -45,7 +45,7 @@ class Kestra:
     Example - Send an output:
         Kestra.outputs({"my_output": "my_value"})
 
-    Example - Send an asset:
+    Example - Send the assets a script reads and writes:
         Kestra.assets({
             "inputs": [
                 {
@@ -190,7 +190,7 @@ class Kestra:
         and writes to the Kestra server.
 
         Args:
-            map_ (Mapping): The full asset properties to send to the Kestra server.
+            map_ (Mapping): The assets to send, as lists of `inputs` and `outputs`.
         """
         if not isinstance(map_, Mapping):
             raise ValueError(
