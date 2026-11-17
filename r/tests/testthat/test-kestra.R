@@ -128,6 +128,13 @@ test_that("the context is read from an explicit path or base64 KESTRA_CONTEXT", 
   })
 })
 
+test_that("an explicit path never falls back to KESTRA_CONTEXT", {
+  with_context_file(function(file) {
+    Sys.setenv(KESTRA_CONTEXT = jsonlite::base64_enc('{"vars":{"n":42}}'))
+    expect_error(Kestra$context(tempfile()), "No Kestra execution context found")
+  })
+})
+
 test_that("the context fails clearly outside Kestra", {
   with_context_file(function(file) {
     Sys.setenv(KESTRA_EXECUTION_CONTEXT_FILE = tempfile())

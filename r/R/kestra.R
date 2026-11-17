@@ -6,7 +6,7 @@
 #' `Kestra$context(path = NULL)` returns the execution context as a list, read
 #' from `path`, the `KESTRA_EXECUTION_CONTEXT_FILE` environment variable or
 #' `.kestra-execution-context.json` (written when the task sets
-#' `executionContext: true`), with a fallback to the base64-encoded
+#' `executionContext: true`). Without `path`, it falls back to the base64-encoded
 #' `KESTRA_CONTEXT` environment variable. The default context is read once and
 #' cached. It fails outside a Kestra task.
 #'
@@ -84,7 +84,7 @@ Kestra$context <- function(path = NULL) {
   encoded <- Sys.getenv("KESTRA_CONTEXT")
   json <- if (file.exists(file)) {
     readChar(file, file.size(file), useBytes = TRUE)
-  } else if (nzchar(encoded)) {
+  } else if (is.null(path) && nzchar(encoded)) {
     rawToChar(jsonlite::base64_dec(encoded))
   } else {
     stop(sprintf(paste(

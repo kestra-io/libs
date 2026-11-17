@@ -14,7 +14,7 @@ into task outputs, metrics, logs or assets.
 \code{Kestra$context(path = NULL)} returns the execution context as a list, read
 from \code{path}, the \code{KESTRA_EXECUTION_CONTEXT_FILE} environment variable or
 \code{.kestra-execution-context.json} (written when the task sets
-\code{executionContext: true}), with a fallback to the base64-encoded
+\code{executionContext: true}). Without \code{path}, it falls back to the base64-encoded
 \code{KESTRA_CONTEXT} environment variable. The default context is read once and
 cached. It fails outside a Kestra task.
 }
