@@ -59,7 +59,8 @@ test_that("timer measures a function and returns its result", {
   expect_identical(result, 42)
   payload <- jsonlite::fromJSON(sub("^::(.*)::$", "\\1", line))
   expect_identical(payload$metrics$type, "timer")
-  expect_gte(payload$metrics$value, 0.2)
+  # proc.time() can read slightly under the slept time.
+  expect_gt(payload$metrics$value, 0.15)
 })
 
 test_that("logger emits the level and joins the message parts", {
@@ -71,10 +72,16 @@ test_that("logger emits the level and joins the message parts", {
 
 test_that("logger always sends one string, even for vectors or no arguments", {
   expect_identical(
-    emitted(Kestra$logger()$info("rows: ", c(1, 2))),
-    '::{"logs":[{"level":"INFO","message":"rows: 1rows: 2"}]}::'
+    emitted(Kestra$logger()$info("ids ", c("x", "y", "z"), " done")),
+    '::{"logs":[{"level":"INFO","message":"ids x y z done"}]}::'
   )
   expect_identical(emitted(Kestra$logger()$info()), '::{"logs":[{"level":"INFO","message":""}]}::')
+})
+
+test_that("named vectors keep their names at any depth", {
+  line <- emitted(Kestra$outputs(list(stats = c(mean = 1.2, sd = 0.3), top = c(a = 1), nested = list(q = c(p50 = 2)), ids = c(1, 2))))
+
+  expect_identical(line, '::{"outputs":{"stats":{"mean":1.2,"sd":0.3},"top":{"a":1},"nested":{"q":{"p50":2}},"ids":[1,2]}}::')
 })
 
 test_that("assets are sent as a named list", {

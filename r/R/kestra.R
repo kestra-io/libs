@@ -24,7 +24,7 @@ Kestra <- new.env(parent = emptyenv())
 line_terminators <- c("\u0085" = "\\u0085", "\u2028" = "\\u2028", "\u2029" = "\\u2029")
 
 Kestra$format <- function(map) {
-  json <- jsonlite::toJSON(map, auto_unbox = TRUE, digits = NA, na = "null", null = "null", POSIXt = "ISO8601", UTC = TRUE)
+  json <- jsonlite::toJSON(name_vectors(map), auto_unbox = TRUE, digits = NA, na = "null", null = "null", POSIXt = "ISO8601", UTC = TRUE)
   for (char in names(line_terminators)) {
     json <- gsub(char, line_terminators[[char]], json, fixed = TRUE)
   }
@@ -60,7 +60,11 @@ Kestra$timer <- function(name, duration, tags = NULL) {
 }
 
 log_at <- function(level) {
-  function(...) send(list(logs = list(list(level = level, message = paste0(..., collapse = "")))))
+  # Each argument is collapsed first, so a vector prints like cat() does instead of recycling the other arguments.
+  function(...) {
+    message <- paste0(vapply(list(...), paste, character(1), collapse = " "), collapse = "")
+    send(list(logs = list(list(level = level, message = message))))
+  }
 }
 
 logger <- list(
@@ -116,6 +120,18 @@ send_metric <- function(name, type, value, tags) {
 
   tags <- if (length(tags) == 0) structure(list(), names = character(0)) else as_object(tags, "tags")
   send(list(metrics = list(list(name = name, type = type, value = value, tags = tags))))
+}
+
+# toJSON writes named vectors as arrays, which drops names such as those from summary() or coef(), so make them objects.
+name_vectors <- function(x) {
+  if (is.list(x) && !is.data.frame(x)) {
+    x[] <- lapply(x, name_vectors)
+    return(x)
+  }
+  if (is.atomic(x) && !is.null(names(x)) && !inherits(x, "AsIs")) {
+    return(as.list(x))
+  }
+  x
 }
 
 # Unnamed lists would serialize as JSON arrays, so require a name on every element.
