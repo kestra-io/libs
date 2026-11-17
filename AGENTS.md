@@ -4,7 +4,7 @@ One library per language, so script tasks can talk to Kestra without hand-writin
 
 ## Same features in every language
 
-Every library exposes all of these. A feature added to one library is added to all of them, or tracked in an issue under #41.
+Every library exposes all of these. A feature added to one library is added to all of them, or tracked in an issue under #41. Node.js does not read the execution context yet.
 
 | Feature | Line sent to Kestra |
 |---------|---------------------|
@@ -18,7 +18,7 @@ Use the language's own idioms for the API (a `Logger` in Ruby, `slog` in Go, `Ve
 
 ## Execution context
 
-Read `path`, then `KESTRA_EXECUTION_CONTEXT_FILE`, then `.kestra-execution-context.json`, which the task writes when `executionContext: true`. Fall back to the base64-encoded `KESTRA_CONTEXT` variable. Load lazily, cache the default context, and fail with the language's "file not found" error outside a Kestra task.
+Read `path`, then `KESTRA_EXECUTION_CONTEXT_FILE`, then `.kestra-execution-context.json`, which the task writes when `executionContext: true`. Fall back to the base64-encoded `KESTRA_CONTEXT` variable. Load lazily, cache the default context, and fail with a clear error outside a Kestra task, using the language's "file not found" error where it has one.
 
 ## Line format
 
@@ -29,7 +29,7 @@ Read `path`, then `KESTRA_EXECUTION_CONTEXT_FILE`, then `.kestra-execution-conte
 
 ## Code
 
-- Standard library only, plus the JSON package where the language has none built in (`jsonlite` for R).
+- The features above need no dependency beyond the standard library, plus a JSON package where the language has none built in (`jsonlite` for R).
 - Write lines in one call, so concurrent output never interleaves.
-- Test every feature, including the line terminators and non-ASCII text. CI tests the oldest supported and the latest language version, and the `release` job needs every language job.
-- Each language has a README with install, a flow example and a table of calls. List new languages in the root README.
+- Test every feature, including the line terminators and non-ASCII text. Each language has a CI job, and the `release` job needs all of them.
+- A new language gets a README with install, a flow example and a table of calls, and a row in the root README.
