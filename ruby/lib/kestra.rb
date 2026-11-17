@@ -65,7 +65,7 @@ module Kestra
     end
 
     # The execution context as a Hash, read from path, KESTRA_EXECUTION_CONTEXT_FILE or .kestra-execution-context.json
-    # (written when the task sets executionContext: true), falling back to the base64 KESTRA_CONTEXT variable.
+    # (written when the task sets executionContext: true). Without a path, falls back to the base64 KESTRA_CONTEXT variable.
     # The default context is read once. Raises Errno::ENOENT outside a Kestra task.
     def context(path = nil)
       return @context if path.nil? && @context
@@ -74,7 +74,7 @@ module Kestra
       encoded = ENV.fetch("KESTRA_CONTEXT", "")
       json = if File.file?(file)
                File.read(file, encoding: "UTF-8")
-             elsif !encoded.empty?
+             elsif path.nil? && !encoded.empty?
                encoded.unpack1("m").force_encoding("UTF-8")
              else
                raise Errno::ENOENT, "No Kestra execution context found: '#{file}' does not exist and the KESTRA_CONTEXT " \

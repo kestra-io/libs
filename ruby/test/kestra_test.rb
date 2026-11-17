@@ -123,6 +123,13 @@ class KestraTest < Minitest::Test
     end
   end
 
+  def test_explicit_path_never_falls_back_to_the_variable
+    with_context do |_file, dir|
+      ENV["KESTRA_CONTEXT"] = ['{"vars":{"n":42}}'].pack("m0")
+      assert_raises(Errno::ENOENT) { Kestra.context(File.join(dir, "typo.json")) }
+    end
+  end
+
   def test_context_fails_clearly_outside_kestra
     with_context do |_file, dir|
       ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = File.join(dir, "missing.json")
