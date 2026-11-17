@@ -1,16 +1,15 @@
 Set-StrictMode -Version Latest
 
-# Kestra matches one line, and Java treats these as line terminators.
-$LineTerminators = @{ ([string][char]0x85) = '\u0085'; ([string][char]0x2028) = '\u2028'; ([string][char]0x2029) = '\u2029' }
+$ContextFile = '.kestra-execution-context.json'
+$Context = $null
 
 # Written to the console, not the pipeline, so callers that capture function output do not swallow it.
 function Send-KestraMessage {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $Message)
 
     $json = ConvertTo-Json -InputObject $Message -Compress -Depth 100
-    foreach ($terminator in $LineTerminators.GetEnumerator()) {
-        $json = $json.Replace($terminator.Key, $terminator.Value)
-    }
+    # Pure ASCII survives any console code page, and escaping U+0085/2028/2029 keeps the payload on the one line Kestra matches.
+    $json = [regex]::Replace($json, '[^\x00-\x7F]', { param($match) '\u{0:x4}' -f [int][char]$match.Value })
     [Console]::Out.WriteLine('::' + $json + '::')
 }
 
@@ -58,13 +57,34 @@ function Send-KestraOutput {
     Send-KestraOutput (Invoke-RestMethod https://api.example.com/status)
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory, Position = 0)] [object] $Outputs)
+    param([Parameter(Mandatory, Position = 0, ValueFromPipeline)] [object] $Outputs)
 
-    $map = ConvertTo-KestraMap -InputObject $Outputs -What 'Outputs'
-    if ($map.Count -eq 0) {
-        throw [System.ArgumentException]::new('Outputs must contain at least one key, for example @{ rows = 42 }.')
+    process {
+        $map = ConvertTo-KestraMap -InputObject $Outputs -What 'Outputs'
+        if ($map.Count -eq 0) {
+            throw [System.ArgumentException]::new('Outputs must contain at least one key, for example @{ rows = 42 }.')
+        }
+        Send-KestraMessage -Message @{ outputs = $map }
     }
-    Send-KestraMessage -Message @{ outputs = $map }
+}
+
+function Send-KestraAsset {
+    <#
+    .SYNOPSIS
+    Declares the input and output assets of the task, for example tables or files it reads and writes.
+    .EXAMPLE
+    Send-KestraAsset @{ outputs = @(@{ id = 'sales.orders'; type = 'TABLE' }) }
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory, Position = 0, ValueFromPipeline)] [object] $Assets)
+
+    process {
+        $map = ConvertTo-KestraMap -InputObject $Assets -What 'Assets'
+        if ($map.Count -eq 0) {
+            throw [System.ArgumentException]::new('Assets must contain inputs or outputs, for example @{ outputs = @(@{ id = ''sales.orders''; type = ''TABLE'' }) }.')
+        }
+        Send-KestraMessage -Message @{ assets = $map }
+    }
 }
 
 function Send-KestraCounter {
@@ -106,7 +126,7 @@ function Send-KestraTimer {
     .SYNOPSIS
     Sends a timer metric to Kestra, from a duration in seconds or by timing a script block.
     .DESCRIPTION
-    With -ScriptBlock, the block's output is returned. No metric is sent if the block throws.
+    With -ScriptBlock, the block runs in the caller's scope and its output is returned. No metric is sent if the block throws.
     .EXAMPLE
     Send-KestraTimer export 2.5
     .EXAMPLE
@@ -126,25 +146,63 @@ function Send-KestraTimer {
     }
 
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
-    & $ScriptBlock
+    # Dot-sourced, so variables the block sets stay visible to the caller.
+    . $ScriptBlock
     Send-KestraMetric -Name $Name -Type 'timer' -Value $watch.Elapsed.TotalSeconds -Tags $Tags
 }
 
 function Write-KestraLog {
     <#
     .SYNOPSIS
-    Writes a log line that Kestra records at the given level.
+    Writes one log line per message, which Kestra records at the given level.
     .EXAMPLE
     Write-KestraLog Warn '3 accounts could not be disabled'
+    .EXAMPLE
+    try { Get-Item missing.txt -ErrorAction Stop } catch { Write-KestraLog Error ($_ | Out-String) }
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateSet('Trace', 'Debug', 'Info', 'Warn', 'Error')] [string] $Level,
-        [Parameter(Mandatory, Position = 1)] [AllowEmptyString()] [string] $Message
+        [Parameter(Mandatory, Position = 1, ValueFromPipeline, ValueFromRemainingArguments)] [AllowEmptyString()] [string[]] $Message
     )
 
-    $log = [ordered]@{ level = $Level.ToUpperInvariant(); message = $Message }
-    Send-KestraMessage -Message @{ logs = @($log) }
+    process {
+        $logs = @(foreach ($line in $Message) { [ordered]@{ level = $Level.ToUpperInvariant(); message = $line } })
+        Send-KestraMessage -Message @{ logs = $logs }
+    }
 }
 
-Export-ModuleMember -Function Send-KestraOutput, Send-KestraCounter, Send-KestraGauge, Send-KestraTimer, Write-KestraLog
+function Get-KestraContext {
+    <#
+    .SYNOPSIS
+    Returns the execution context (labels, inputs, vars, trigger, outputs of earlier tasks), loaded once and cached.
+    .DESCRIPTION
+    Reads -Path, then $env:KESTRA_EXECUTION_CONTEXT_FILE, then .kestra-execution-context.json, which the task writes when executionContext is true.
+    Falls back to the base64-encoded $env:KESTRA_CONTEXT. Throws System.IO.FileNotFoundException outside a Kestra task.
+    .EXAMPLE
+    (Get-KestraContext).labels.env
+    #>
+    [CmdletBinding()]
+    param([string] $Path)
+
+    if (-not $Path -and $null -ne $script:Context) {
+        return $script:Context
+    }
+
+    $file = if ($Path) { $Path } elseif ($env:KESTRA_EXECUTION_CONTEXT_FILE) { $env:KESTRA_EXECUTION_CONTEXT_FILE } else { $ContextFile }
+    $json = if (Test-Path -LiteralPath $file -PathType Leaf) {
+        Get-Content -LiteralPath $file -Raw -Encoding UTF8
+    } elseif ($env:KESTRA_CONTEXT) {
+        [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:KESTRA_CONTEXT))
+    } else {
+        throw [System.IO.FileNotFoundException]::new("No Kestra execution context found: '$file' does not exist and the KESTRA_CONTEXT environment variable is not set. The execution context is only available when the script runs inside a Kestra task.", $file)
+    }
+
+    $context = ConvertFrom-Json -InputObject $json
+    if (-not $Path) {
+        $script:Context = $context
+    }
+    $context
+}
+
+Export-ModuleMember -Function Send-KestraOutput, Send-KestraAsset, Send-KestraCounter, Send-KestraGauge, Send-KestraTimer, Write-KestraLog, Get-KestraContext

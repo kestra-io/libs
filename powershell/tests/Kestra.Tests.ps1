@@ -48,12 +48,24 @@ Describe 'Send-KestraOutput' {
     }
 
     It 'accepts a PSCustomObject, as returned by ConvertFrom-Json or Invoke-RestMethod' {
-        $status = '{"rows": 42, "name": "caf\u00e9", "nested": {"ok": true}}' | ConvertFrom-Json
+        $status = '{"rows": 42, "nested": {"ok": true}}' | ConvertFrom-Json
         $payload = ConvertFrom-Emitted (Get-Emitted { Send-KestraOutput $status })
 
         $payload.outputs.rows | Should -Be 42
-        $payload.outputs.name | Should -BeExactly ('caf' + [char]0xe9)
         $payload.outputs.nested.ok | Should -BeTrue
+    }
+
+    It 'escapes non-ASCII, so a console code page cannot mangle it' {
+        $name = 'caf' + [char]0xe9 + ' ' + [char]0xd83d + [char]0xde00
+        $line = Get-Emitted { Send-KestraOutput @{ name = $name } }
+
+        $line | Should -BeExactly '::{"outputs":{"name":"caf\u00e9 \ud83d\ude00"}}::'
+        (ConvertFrom-Emitted $line).outputs.name | Should -BeExactly $name
+    }
+
+    It 'takes outputs from the pipeline' {
+        Get-Emitted { '{"rows": 1}' | ConvertFrom-Json | Send-KestraOutput } |
+            Should -BeExactly '::{"outputs":{"rows":1}}::'
     }
 
     It 'rejects empty outputs and values that are not maps' {
@@ -103,6 +115,10 @@ Describe 'metrics' {
         $metric.value | Should -BeGreaterOrEqual 0.2
     }
 
+    It 'runs the script block in the caller scope' {
+        Get-Emitted { Send-KestraTimer fit -ScriptBlock { $rows = 5 }; $rows | Should -Be 5 }
+    }
+
     It 'sends a timer from seconds' {
         $metric = (ConvertFrom-Emitted (Get-Emitted { Send-KestraTimer export 2.5 })).metrics[0]
 
@@ -122,7 +138,77 @@ Describe 'Write-KestraLog' {
             Should -BeExactly '::{"logs":[{"level":"INFO","message":""}]}::'
     }
 
+    It 'sends one entry per message, from arguments or the pipeline' {
+        Get-Emitted { Write-KestraLog Info 'a' 'b' } |
+            Should -BeExactly '::{"logs":[{"level":"INFO","message":"a"},{"level":"INFO","message":"b"}]}::'
+        @(Get-Emitted { 'a', 'b' | Write-KestraLog Error }) |
+            Should -BeExactly @('::{"logs":[{"level":"ERROR","message":"a"}]}::', '::{"logs":[{"level":"ERROR","message":"b"}]}::')
+    }
+
     It 'rejects unknown levels' {
         { Write-KestraLog Fatal 'x' } | Should -Throw
+    }
+}
+
+Describe 'Send-KestraAsset' {
+    It 'sends input and output assets' {
+        $assets = @{ inputs = @(@{ id = 'raw.orders' }); outputs = @(@{ id = 'sales.orders'; type = 'TABLE'; metadata = @{ owner = 'team_a' } }) }
+        $payload = ConvertFrom-Emitted (Get-Emitted { Send-KestraAsset $assets })
+
+        $payload.assets.inputs[0].id | Should -Be 'raw.orders'
+        $payload.assets.outputs[0].type | Should -Be 'TABLE'
+        $payload.assets.outputs[0].metadata.owner | Should -Be 'team_a'
+    }
+
+    It 'rejects empty assets' {
+        { Send-KestraAsset @{} } | Should -Throw '*inputs or outputs*'
+    }
+}
+
+Describe 'Get-KestraContext' {
+    BeforeEach {
+        & (Get-Module Kestra) { $script:Context = $null }
+        $json = '{"labels": {"env": "prod"}, "inputs": {"text": "a\nb"}, "trigger": {"startDate": "2025-01-01T00:00:00Z"}}'
+        $file = Join-Path $TestDrive 'context.json'
+        Set-Content -LiteralPath $file -Value $json -Encoding UTF8
+        $env:KESTRA_EXECUTION_CONTEXT_FILE = $file
+        $env:KESTRA_CONTEXT = $null
+    }
+
+    AfterEach {
+        $env:KESTRA_EXECUTION_CONTEXT_FILE = $null
+        $env:KESTRA_CONTEXT = $null
+    }
+
+    It 'reads the file named by KESTRA_EXECUTION_CONTEXT_FILE and allows dot access' {
+        $context = Get-KestraContext
+
+        $context.labels.env | Should -Be 'prod'
+        $context.inputs.text | Should -BeExactly "a`nb"
+        $context.trigger.startDate | Should -Not -BeNullOrEmpty
+    }
+
+    It 'loads the context once' {
+        $first = Get-KestraContext
+        Remove-Item -LiteralPath $env:KESTRA_EXECUTION_CONTEXT_FILE
+
+        Get-KestraContext | Should -Be $first
+    }
+
+    It 'reads an explicit path' {
+        (Get-KestraContext -Path $env:KESTRA_EXECUTION_CONTEXT_FILE).labels.env | Should -Be 'prod'
+    }
+
+    It 'falls back to base64 KESTRA_CONTEXT' {
+        $env:KESTRA_EXECUTION_CONTEXT_FILE = Join-Path $TestDrive 'missing.json'
+        $env:KESTRA_CONTEXT = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"vars": {"n": 42}}'))
+
+        (Get-KestraContext).vars.n | Should -Be 42
+    }
+
+    It 'throws FileNotFoundException outside a Kestra task' {
+        $env:KESTRA_EXECUTION_CONTEXT_FILE = Join-Path $TestDrive 'missing.json'
+
+        { Get-KestraContext } | Should -Throw -ExceptionType ([System.IO.FileNotFoundException])
     }
 }

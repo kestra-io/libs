@@ -7,7 +7,7 @@
     Copyright         = '(c) Kestra Technologies'
     Description       = 'Send outputs, metrics and logs from PowerShell script tasks to Kestra.'
     PowerShellVersion = '5.1'
-    FunctionsToExport = @('Send-KestraOutput', 'Send-KestraCounter', 'Send-KestraGauge', 'Send-KestraTimer', 'Write-KestraLog')
+    FunctionsToExport = @('Send-KestraOutput', 'Send-KestraAsset', 'Send-KestraCounter', 'Send-KestraGauge', 'Send-KestraTimer', 'Write-KestraLog', 'Get-KestraContext')
     CmdletsToExport   = @()
     VariablesToExport = @()
     AliasesToExport   = @()

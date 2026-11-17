@@ -37,11 +37,15 @@ tasks:
 
 | Command | Result in Kestra |
 |---------|------------------|
-| `Send-KestraOutput <hashtable or PSCustomObject>` | Task outputs under `outputs.<task>.vars` |
+| `Send-KestraOutput <hashtable or PSCustomObject>` | Task outputs under `outputs.<task>.vars`. Also takes pipeline input |
+| `Send-KestraAsset @{ inputs = @(...); outputs = @(...) }` | Input and output assets of the task |
 | `Send-KestraCounter <name> <value> [@{ tags }]` | Counter metric |
 | `Send-KestraGauge <name> <value> [@{ tags }]` | Gauge metric |
-| `Send-KestraTimer <name> <seconds> [@{ tags }]` or `-ScriptBlock { }` | Timer metric. A script block is timed and its output returned |
-| `Write-KestraLog <Trace\|Debug\|Info\|Warn\|Error> <message>` | Log line at that level |
+| `Send-KestraTimer <name> <seconds> [@{ tags }]` or `-ScriptBlock { }` | Timer metric. A script block runs in the caller's scope, is timed and its output returned |
+| `Write-KestraLog <Trace\|Debug\|Info\|Warn\|Error> <message...>` | One log line per message, at that level. Also takes pipeline input |
+| `Get-KestraContext [-Path <file>]` | The execution context, for example `(Get-KestraContext).labels.env`. Needs `executionContext: true` on the task |
+
+In a `catch` block, send the whole error with `Write-KestraLog Error ($_ | Out-String)`.
 
 The commands write straight to the console, so `$x = Send-KestraOutput ...` or calls inside a function whose output is captured still reach Kestra.
 
