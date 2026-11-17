@@ -127,6 +127,8 @@ jobs:
         run: ruby -w -Ilib test/kestra_test.rb
 
       - name: Build gem
+        env:
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '0.0.0' }}
         run: gem build kestra.gemspec
 
   release:

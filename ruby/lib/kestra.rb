@@ -4,8 +4,6 @@ require "logger"
 # Sends outputs, metrics, logs and assets from Ruby script tasks to Kestra, and reads the execution context.
 # Each send call prints one `::{...}::` line to stdout, which Kestra parses.
 module Kestra
-  VERSION = "0.1.0"
-
   # Kestra matches one line, and Java treats these as line terminators.
   LINE_TERMINATORS = { "\u0085" => "\\u0085", "\u2028" => "\\u2028", "\u2029" => "\\u2029" }.freeze
   LINE_TERMINATOR = Regexp.union(LINE_TERMINATORS.keys)
