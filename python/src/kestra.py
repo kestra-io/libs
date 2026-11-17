@@ -796,9 +796,10 @@ def load_execution_context(path: Optional[str] = None) -> ExecutionContext:
     Load the execution context injected by Kestra into the task working directory.
 
     The context is read from `path`, from the `KESTRA_EXECUTION_CONTEXT_FILE`
-    environment variable, or from `.kestra-execution-context.json`. When no file
-    exists, the base64-encoded `KESTRA_CONTEXT` environment variable is used as a
-    fallback.
+    environment variable, or from `.kestra-execution-context.json`. Without `path`,
+    when no file exists, the base64-encoded `KESTRA_CONTEXT` environment variable
+    is used as a fallback. A `path` that does not exist always fails, so a typo is
+    never hidden.
 
     Args:
         path (str): The path to the context file (optional).
@@ -809,14 +810,15 @@ def load_execution_context(path: Optional[str] = None) -> ExecutionContext:
     Raises:
         FileNotFoundError: When no execution context can be found.
     """
-    path = path or os.environ.get("KESTRA_EXECUTION_CONTEXT_FILE", CONTEXT_FILE)
+    is_explicit = bool(path)
+    path = path or os.environ.get("KESTRA_EXECUTION_CONTEXT_FILE") or CONTEXT_FILE
 
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as file:
             return ExecutionContext(json.load(file))
 
     encoded = os.environ.get("KESTRA_CONTEXT")
-    if encoded:
+    if encoded and not is_explicit:
         return ExecutionContext(json.loads(base64.b64decode(encoded)))
 
     raise FileNotFoundError(
