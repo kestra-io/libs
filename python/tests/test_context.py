@@ -59,14 +59,17 @@ def test_base64_env_fallback(tmp_path, monkeypatch):
 def test_explicit_path_never_falls_back_to_base64_env(tmp_path, monkeypatch):
     monkeypatch.setenv("KESTRA_CONTEXT", base64.b64encode(json.dumps(CONTEXT).encode()).decode())
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="typo.json") as error:
         load_execution_context(str(tmp_path / "typo.json"))
+
+    assert "KESTRA_CONTEXT" not in str(error.value)
 
 
 def test_empty_file_variable_means_the_default_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".kestra-execution-context.json").write_text(json.dumps(CONTEXT))
     monkeypatch.setenv("KESTRA_EXECUTION_CONTEXT_FILE", "")
+    monkeypatch.delenv("KESTRA_CONTEXT", raising=False)
 
     assert load_execution_context().labels.env == "prod"
 

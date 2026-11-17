@@ -192,7 +192,8 @@ df = pd.read_csv(csv_path)
 The context is read from the `.kestra-execution-context.json` file that Kestra injects
 into the task working directory. Use `KESTRA_EXECUTION_CONTEXT_FILE` to read it from
 another path, or set the base64-encoded `KESTRA_CONTEXT` environment variable when no
-file is available.
+file is available. That fallback does not apply to `load_execution_context(path)`: a
+`path` that does not exist raises `FileNotFoundError`.
 
 It is loaded lazily on first access and raises a `FileNotFoundError` when the script
 does not run inside a Kestra task.
@@ -208,7 +209,7 @@ traversed with attributes: `context.inputs.my_list[0].my_key`.
 - **context[name]**: Same as attribute access. Required for keys that are not valid Python identifiers, or that collide with a method name such as `context["items"]`.
 - **context.get(name, default=None)**: Returns `default` instead of raising when the key is missing.
 - **context.to_dict()**: Returns the raw context as a plain `dict`, ready for `json.dumps`.
-- **load_execution_context(path=None) -> ExecutionContext**: Loads the context explicitly, from `path` when given.
+- **load_execution_context(path=None) -> ExecutionContext**: Loads the context explicitly, from `path` when given. A `path` that does not exist raises `FileNotFoundError` instead of falling back to `KESTRA_CONTEXT`.
 
 ## Kestra Ion
 

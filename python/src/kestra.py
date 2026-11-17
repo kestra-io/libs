@@ -821,6 +821,9 @@ def load_execution_context(path: Optional[str] = None) -> ExecutionContext:
     if encoded and not is_explicit:
         return ExecutionContext(json.loads(base64.b64decode(encoded)))
 
+    if is_explicit:
+        raise FileNotFoundError(f"Kestra execution context file '{path}' does not exist.")
+
     raise FileNotFoundError(
         f"No Kestra execution context found: '{path}' does not exist and the "
         "KESTRA_CONTEXT environment variable is not set. The execution context is "
