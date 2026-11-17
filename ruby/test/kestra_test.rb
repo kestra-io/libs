@@ -1,5 +1,6 @@
 require "minitest/autorun"
 require "json"
+require "tmpdir"
 require "kestra"
 
 class KestraTest < Minitest::Test
@@ -75,5 +76,58 @@ class KestraTest < Minitest::Test
     assert_equal [%(::{"logs":[{"level":"DEBUG","message":"caf\u00e9"}]}::),
                   '::{"logs":[{"level":"WARN","message":"3 rows skipped"}]}::',
                   '::{"logs":[{"level":"ERROR","message":"boom"}]}::'], lines
+  end
+
+  def test_assets_are_sent_as_given
+    assets = { inputs: [{ id: "raw.orders" }], outputs: [{ id: "sales.orders", type: "TABLE", metadata: { owner: "team_a" } }] }
+
+    assert_equal ['::{"assets":{"inputs":[{"id":"raw.orders"}],"outputs":[{"id":"sales.orders","type":"TABLE","metadata":{"owner":"team_a"}}]}}::'],
+                 emitted { Kestra.assets(assets) }
+    assert_raises(ArgumentError) { Kestra.assets({}) }
+  end
+
+  def with_context
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "context.json")
+      File.write(file, '{"labels":{"env":"prod"},"inputs":{"text":"a\\nb caf\\u00e9"}}')
+      saved = ENV.to_h.slice("KESTRA_EXECUTION_CONTEXT_FILE", "KESTRA_CONTEXT")
+      ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = file
+      ENV.delete("KESTRA_CONTEXT")
+      Kestra.instance_variable_set(:@context, nil)
+      yield file, dir
+    ensure
+      ENV.delete("KESTRA_EXECUTION_CONTEXT_FILE")
+      ENV.update(saved)
+      Kestra.instance_variable_set(:@context, nil)
+    end
+  end
+
+  def test_context_is_read_from_the_file_once
+    with_context do |file|
+      context = Kestra.context
+      assert_equal "prod", context["labels"]["env"]
+      assert_equal "a\nb caf\u00e9", context["inputs"]["text"]
+
+      File.delete(file)
+      assert_same context, Kestra.context
+    end
+  end
+
+  def test_context_from_an_explicit_path_or_base64_variable
+    with_context do |file, dir|
+      assert_equal "prod", Kestra.context(file)["labels"]["env"]
+
+      ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = File.join(dir, "missing.json")
+      ENV["KESTRA_CONTEXT"] = ['{"vars":{"n":42}}'].pack("m0")
+      assert_equal 42, Kestra.context["vars"]["n"]
+    end
+  end
+
+  def test_context_fails_clearly_outside_kestra
+    with_context do |_file, dir|
+      ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = File.join(dir, "missing.json")
+      error = assert_raises(Errno::ENOENT) { Kestra.context }
+      assert_match(/No Kestra execution context found/, error.message)
+    end
   end
 end

@@ -1,14 +1,16 @@
 require "json"
 require "logger"
 
-# Sends outputs, metrics and logs from Ruby script tasks to Kestra.
-# Each call prints one `::{...}::` line to stdout, which Kestra parses.
+# Sends outputs, metrics, logs and assets from Ruby script tasks to Kestra, and reads the execution context.
+# Each send call prints one `::{...}::` line to stdout, which Kestra parses.
 module Kestra
   VERSION = "0.1.0"
 
   # Kestra matches one line, and Java treats these as line terminators.
   LINE_TERMINATORS = { "\u0085" => "\\u0085", "\u2028" => "\\u2028", "\u2029" => "\\u2029" }.freeze
   LINE_TERMINATOR = Regexp.union(LINE_TERMINATORS.keys)
+
+  CONTEXT_FILE = ".kestra-execution-context.json"
 
   # Ruby severities without a Kestra equivalent.
   LEVELS = { "FATAL" => "ERROR", "ANY" => "INFO" }.freeze
@@ -24,6 +26,14 @@ module Kestra
       end
 
       send_message(outputs: outputs)
+    end
+
+    def assets(assets)
+      unless assets.is_a?(Hash) && !assets.empty?
+        raise ArgumentError, "Assets must be a non-empty Hash, for example Kestra.assets(outputs: [{ id: \"sales.orders\", type: \"TABLE\" }])."
+      end
+
+      send_message(assets: assets)
     end
 
     def counter(name, value, tags: {})
@@ -52,6 +62,27 @@ module Kestra
     # A standard Logger, so it can be passed to any code that accepts one.
     def logger
       @logger ||= Logger.new($stdout, formatter: LogFormatter.new)
+    end
+
+    # The execution context as a Hash, read from path, KESTRA_EXECUTION_CONTEXT_FILE or .kestra-execution-context.json
+    # (written when the task sets executionContext: true), falling back to the base64 KESTRA_CONTEXT variable.
+    # The default context is read once. Raises Errno::ENOENT outside a Kestra task.
+    def context(path = nil)
+      return @context if path.nil? && @context
+
+      file = path || ENV.fetch("KESTRA_EXECUTION_CONTEXT_FILE", CONTEXT_FILE)
+      encoded = ENV.fetch("KESTRA_CONTEXT", "")
+      json = if File.file?(file)
+               File.read(file, encoding: "UTF-8")
+             elsif !encoded.empty?
+               encoded.unpack1("m").force_encoding("UTF-8")
+             else
+               raise Errno::ENOENT, "No Kestra execution context found: '#{file}' does not exist and the KESTRA_CONTEXT " \
+                                    "environment variable is not set. The execution context is only available when the script runs inside a Kestra task."
+             end
+      context = JSON.parse(json)
+      @context = context if path.nil?
+      context
     end
 
     private

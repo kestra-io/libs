@@ -43,6 +43,12 @@
 
 Libraries to interact with metrics and outputs in Kestra script tasks.
 
+| Language | Directory |
+|----------|-----------|
+| Python | [`python/`](python/) |
+| Node.js | [`javascript/`](javascript/) |
+| Ruby | [`ruby/`](ruby/) |
+
 ![Kestra orchestrator](https://kestra.io/video.gif)
 
 

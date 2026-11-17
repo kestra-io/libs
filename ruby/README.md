@@ -1,6 +1,6 @@
 # kestra (Ruby)
 
-Send outputs, metrics and logs from Ruby script tasks to Kestra. Each call prints one `::{...}::` line to stdout, which Kestra reads. A single file with no dependencies outside the standard library.
+Send outputs, metrics, logs and assets from Ruby script tasks to Kestra. Each call prints one `::{...}::` line to stdout, which Kestra reads. A single file with no dependencies outside the standard library.
 
 ## Install
 
@@ -40,9 +40,11 @@ tasks:
 | Call | Result in Kestra |
 |------|------------------|
 | `Kestra.outputs(hash)` | Task outputs under `outputs.<task>.vars` |
+| `Kestra.assets(inputs: [...], outputs: [...])` | Input and output assets of the task |
 | `Kestra.counter(name, value, tags: {})` | Counter metric |
 | `Kestra.gauge(name, value, tags: {})` | Gauge metric |
 | `Kestra.timer(name, seconds, tags: {})` or `Kestra.timer(name) { ... }` | Timer metric. A block is timed and its result returned |
 | `Kestra.logger.debug/info/warn/error(message)` | Log line at that level. `fatal` is sent as ERROR |
+| `Kestra.context(path = nil)` | The execution context as a Hash, for example `Kestra.context["labels"]`. Needs `executionContext: true` on the task |
 
 `Kestra.logger` is a standard `Logger`, so it can be passed to any library that accepts one. Values are serialized with `JSON.generate`, so a `Time` is sent as its `to_s` string. Call `iso8601` first if a downstream task parses it.
