@@ -9,7 +9,7 @@ Every library exposes all of these. A feature added to one library is added to a
 | Feature | Line sent to Kestra |
 |---------|---------------------|
 | Outputs | `{"outputs": {...}}` |
-| Counter, gauge and timer metrics with optional string tags | `{"metrics": [{"name", "type", "value", "tags"}]}`. Timers are in seconds |
+| Counter, gauge and timer metrics with optional string tags | `{"metrics": [{"name", "type", "value", "tags"}]}`. `value` is a plain JSON number (timers in seconds) and tag values are strings, or Kestra drops the metric |
 | Logs at TRACE, DEBUG, INFO, WARN and ERROR | `{"logs": [{"level", "message"}]}`. `message` is always a string |
 | Assets | `{"assets": {"inputs": [...], "outputs": [...]}}` |
 | Execution context | Read, not sent. See below |
@@ -30,6 +30,6 @@ Read `path`, then `KESTRA_EXECUTION_CONTEXT_FILE`, then `.kestra-execution-conte
 ## Code
 
 - The features above need no dependency beyond the standard library, plus a JSON package where the language has none built in (`jsonlite` for R).
-- Write lines in one call, so concurrent output never interleaves.
+- Write each line in one call and flush it. Kestra reads a pipe, where output is buffered, so an unflushed line arrives late or is lost when the task is killed.
 - Test every feature, including the line terminators and non-ASCII text. Each language has a CI job, and the `release` job needs all of them.
 - A new language gets a README with install, a flow example and a table of calls, and a row in the root README.
