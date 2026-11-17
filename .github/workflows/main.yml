@@ -104,6 +104,31 @@ jobs:
         run: npm publish --access public
 
 
+  ruby:
+    name: Test Ruby gem (${{ matrix.ruby }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ['2.7', '3.4']
+    defaults:
+      run:
+        working-directory: ruby
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+
+      - name: Test
+        run: ruby -w -Ilib test/kestra_test.rb
+
+      - name: Build gem
+        run: gem build kestra.gemspec
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -111,6 +136,7 @@ jobs:
     needs:
       - pip
       - npm
+      - ruby
     steps:
       - name: Create Release
         uses: actions/create-release@v1
