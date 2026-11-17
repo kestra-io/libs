@@ -127,6 +127,7 @@ func TestLoggerMapsLevelsAndAppendsAttributes(t *testing.T) {
 		log.Info("info")
 		log.With("job", "import").WithGroup("db").Warn("slow query", "ms", 250)
 		log.Error("failed", "err", "timeout")
+		log.Info("retry", "time", 3, "level", "high", "msg", "x")
 	})
 
 	want := []string{
@@ -135,6 +136,7 @@ func TestLoggerMapsLevelsAndAppendsAttributes(t *testing.T) {
 		`::{"logs":[{"level":"INFO","message":"info"}]}::`,
 		`::{"logs":[{"level":"WARN","message":"slow query job=import db.ms=250"}]}::`,
 		`::{"logs":[{"level":"ERROR","message":"failed err=timeout"}]}::`,
+		`::{"logs":[{"level":"INFO","message":"retry time=3 level=high msg=x"}]}::`,
 	}
 	if strings.Join(lines, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got %q", lines)
@@ -148,7 +150,9 @@ func TestConcurrentCallsWriteWholeLines(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				must(t, Counter("rows", 1, nil))
+				if err := Counter("rows", 1, nil); err != nil {
+					t.Error(err)
+				}
 				Logger().Info("done", "worker", 1)
 			}()
 		}

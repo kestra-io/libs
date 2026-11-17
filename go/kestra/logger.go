@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 )
 
 var logger = slog.New(newHandler())
@@ -25,25 +26,25 @@ type handler struct {
 
 func newHandler() *handler {
 	buf := &bytes.Buffer{}
-	attrs := slog.NewTextHandler(buf, &slog.HandlerOptions{
-		Level: slog.Level(-100),
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if len(groups) == 0 && (a.Key == slog.TimeKey || a.Key == slog.LevelKey || a.Key == slog.MessageKey) {
-				return slog.Attr{}
-			}
-			return a
-		},
-	})
-	return &handler{attrs: attrs, buf: buf, mu: &sync.Mutex{}}
+	return &handler{attrs: slog.NewTextHandler(buf, nil), buf: buf, mu: &sync.Mutex{}}
 }
+
+// The text handler always writes these built-ins first. A zero time is omitted, and caller attributes follow.
+const builtins = `level=INFO msg=""`
 
 func (h *handler) Enabled(context.Context, slog.Level) bool { return true }
 
 func (h *handler) Handle(ctx context.Context, record slog.Record) error {
+	attrs := slog.NewRecord(time.Time{}, slog.LevelInfo, "", 0)
+	record.Attrs(func(a slog.Attr) bool {
+		attrs.AddAttrs(a)
+		return true
+	})
+
 	h.mu.Lock()
 	h.buf.Reset()
-	err := h.attrs.Handle(ctx, record)
-	rendered := strings.TrimSpace(h.buf.String())
+	err := h.attrs.Handle(ctx, attrs)
+	rendered := strings.TrimSpace(strings.TrimPrefix(h.buf.String(), builtins))
 	h.mu.Unlock()
 	if err != nil {
 		return err

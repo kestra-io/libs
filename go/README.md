@@ -12,7 +12,7 @@ go mod tidy
 
 The `go` tool writes progress such as `go: downloading ...` to stderr, which Kestra logs as ERROR, so the flow below redirects it with `2>&1`.
 
-Pin a release instead of `main` in production flows, so a push to `main` cannot change what runs. Releases are tagged `go/vX.Y.Z`, for example `go get github.com/kestra-io/libs/go@v0.1.0`.
+Each release `vX.Y.Z` also tags `go/vX.Y.Z`, so from the first release that includes this module, pin it with `go get github.com/kestra-io/libs/go@vX.Y.Z` instead of `main`. A pinned version cannot change when `main` does.
 
 ## Usage
 
