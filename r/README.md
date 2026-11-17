@@ -39,10 +39,12 @@ tasks:
 | Call | Result in Kestra |
 |------|------------------|
 | `Kestra$outputs(list(...))` | Task outputs under `outputs.<task>.vars` |
+| `Kestra$assets(list(inputs = list(...), outputs = list(...)))` | Input and output assets of the task |
 | `Kestra$counter(name, value, tags)` | Counter metric |
 | `Kestra$gauge(name, value, tags)` | Gauge metric |
 | `Kestra$timer(name, seconds_or_function, tags)` | Timer metric. A function is timed and its result returned |
 | `Kestra$logger()$trace/debug/info/warn/error(...)` | Log line at that level |
+| `Kestra$context(path = NULL)` | The execution context as a list, for example `Kestra$context()$labels$env`. Needs `executionContext: true` on the task |
 
 `tags` is optional and must be named, as a list or a named vector. Date-times are sent in UTC, for example `2026-11-16T09:00:00Z`.
 

@@ -76,3 +76,61 @@ test_that("logger always sends one string, even for vectors or no arguments", {
   )
   expect_identical(emitted(Kestra$logger()$info()), '::{"logs":[{"level":"INFO","message":""}]}::')
 })
+
+test_that("assets are sent as a named list", {
+  line <- emitted(Kestra$assets(list(
+    inputs = list(list(id = "raw.orders")),
+    outputs = list(list(id = "sales.orders", type = "TABLE", metadata = list(owner = "team_a")))
+  )))
+
+  expect_identical(line, paste0(
+    '::{"assets":{"inputs":[{"id":"raw.orders"}],',
+    '"outputs":[{"id":"sales.orders","type":"TABLE","metadata":{"owner":"team_a"}}]}}::'
+  ))
+  expect_error(Kestra$assets(list()), "assets must be a non-empty named list")
+})
+
+context_json <- '{"labels":{"env":"prod"},"inputs":{"text":"a\\nb caf\\u00e9","files":[{"name":"first"},2]}}'
+
+with_context_file <- function(code) {
+  file <- tempfile(fileext = ".json")
+  writeLines(context_json, file)
+  old <- Sys.getenv(c("KESTRA_EXECUTION_CONTEXT_FILE", "KESTRA_CONTEXT"), unset = NA)
+  on.exit({
+    Sys.unsetenv(names(old)[is.na(old)])
+    if (any(!is.na(old))) do.call(Sys.setenv, as.list(old[!is.na(old)]))
+    rm(list = ls(cache), envir = cache)
+  })
+  Sys.setenv(KESTRA_EXECUTION_CONTEXT_FILE = file)
+  Sys.unsetenv("KESTRA_CONTEXT")
+  rm(list = ls(cache), envir = cache)
+  code(file)
+}
+
+test_that("the context is read from KESTRA_EXECUTION_CONTEXT_FILE once", {
+  with_context_file(function(file) {
+    context <- Kestra$context()
+    expect_identical(context$labels$env, "prod")
+    expect_identical(context$inputs$text, "a\nb caf\u00e9")
+    expect_identical(context$inputs$files[[1]]$name, "first")
+
+    unlink(file)
+    expect_identical(Kestra$context(), context)
+  })
+})
+
+test_that("the context is read from an explicit path or base64 KESTRA_CONTEXT", {
+  with_context_file(function(file) {
+    expect_identical(Kestra$context(file)$labels$env, "prod")
+
+    Sys.setenv(KESTRA_EXECUTION_CONTEXT_FILE = tempfile(), KESTRA_CONTEXT = jsonlite::base64_enc('{"vars":{"n":42}}'))
+    expect_identical(Kestra$context()$vars$n, 42L)
+  })
+})
+
+test_that("the context fails clearly outside Kestra", {
+  with_context_file(function(file) {
+    Sys.setenv(KESTRA_EXECUTION_CONTEXT_FILE = tempfile())
+    expect_error(Kestra$context(), "No Kestra execution context found")
+  })
+})

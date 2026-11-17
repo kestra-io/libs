@@ -2,16 +2,25 @@
 % Please edit documentation in R/kestra.R
 \name{Kestra}
 \alias{Kestra}
-\title{Send outputs, metrics and logs to Kestra}
+\title{Send outputs, metrics, logs and assets to Kestra, and read the execution context}
 \usage{
 Kestra
 }
 \description{
-Each function prints one \verb{::\{...\}::} line to stdout, which Kestra parses
-into task outputs, metrics or logs.
+Each send function prints one \verb{::\{...\}::} line to stdout, which Kestra parses
+into task outputs, metrics, logs or assets.
+}
+\details{
+\code{Kestra$context(path = NULL)} returns the execution context as a list, read
+from \code{path}, the \code{KESTRA_EXECUTION_CONTEXT_FILE} environment variable or
+\code{.kestra-execution-context.json} (written when the task sets
+\code{executionContext: true}), with a fallback to the base64-encoded
+\code{KESTRA_CONTEXT} environment variable. The default context is read once and
+cached. It fails outside a Kestra task.
 }
 \examples{
 Kestra$outputs(list(accuracy = 0.91))
+Kestra$assets(list(outputs = list(list(id = "sales.orders", type = "TABLE"))))
 Kestra$counter("rows", 15000, list(source = "s3"))
 model <- Kestra$timer("fit", function() lm(dist ~ speed, cars))
 Kestra$logger()$warn("3 rows had missing values")

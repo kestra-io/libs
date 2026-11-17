@@ -1,14 +1,22 @@
-#' Send outputs, metrics and logs to Kestra
+#' Send outputs, metrics, logs and assets to Kestra, and read the execution context
 #'
-#' Each function prints one `::{...}::` line to stdout, which Kestra parses
-#' into task outputs, metrics or logs.
+#' Each send function prints one `::{...}::` line to stdout, which Kestra parses
+#' into task outputs, metrics, logs or assets.
+#'
+#' `Kestra$context(path = NULL)` returns the execution context as a list, read
+#' from `path`, the `KESTRA_EXECUTION_CONTEXT_FILE` environment variable or
+#' `.kestra-execution-context.json` (written when the task sets
+#' `executionContext: true`), with a fallback to the base64-encoded
+#' `KESTRA_CONTEXT` environment variable. The default context is read once and
+#' cached. It fails outside a Kestra task.
 #'
 #' @examples
 #' Kestra$outputs(list(accuracy = 0.91))
+#' Kestra$assets(list(outputs = list(list(id = "sales.orders", type = "TABLE"))))
 #' Kestra$counter("rows", 15000, list(source = "s3"))
 #' model <- Kestra$timer("fit", function() lm(dist ~ speed, cars))
 #' Kestra$logger()$warn("3 rows had missing values")
-#' @importFrom jsonlite toJSON
+#' @importFrom jsonlite toJSON fromJSON base64_dec
 #' @export
 Kestra <- new.env(parent = emptyenv())
 
@@ -25,6 +33,10 @@ Kestra$format <- function(map) {
 
 Kestra$outputs <- function(outputs) {
   send(list(outputs = as_object(outputs, "outputs")))
+}
+
+Kestra$assets <- function(assets) {
+  send(list(assets = as_object(assets, "assets")))
 }
 
 Kestra$counter <- function(name, value, tags = NULL) {
@@ -60,6 +72,33 @@ logger <- list(
 )
 
 Kestra$logger <- function() logger
+
+context_file <- ".kestra-execution-context.json"
+cache <- new.env(parent = emptyenv())
+
+Kestra$context <- function(path = NULL) {
+  if (is.null(path) && !is.null(cache$context)) {
+    return(cache$context)
+  }
+  file <- if (is.null(path)) Sys.getenv("KESTRA_EXECUTION_CONTEXT_FILE", context_file) else path
+  encoded <- Sys.getenv("KESTRA_CONTEXT")
+  json <- if (file.exists(file)) {
+    readChar(file, file.size(file), useBytes = TRUE)
+  } else if (nzchar(encoded)) {
+    rawToChar(jsonlite::base64_dec(encoded))
+  } else {
+    stop(sprintf(paste(
+      "No Kestra execution context found: '%s' does not exist and the KESTRA_CONTEXT environment variable is not set.",
+      "The execution context is only available when the script runs inside a Kestra task."
+    ), file), call. = FALSE)
+  }
+  Encoding(json) <- "UTF-8"
+  context <- jsonlite::fromJSON(json, simplifyVector = FALSE)
+  if (is.null(path)) {
+    cache$context <- context
+  }
+  context
+}
 
 send <- function(map) {
   # Bytes as-is, so a non-UTF-8 locale cannot turn characters into <U+00E9> escapes.
