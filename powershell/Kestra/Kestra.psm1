@@ -178,7 +178,7 @@ function Get-KestraContext {
     Returns the execution context (labels, inputs, vars, trigger, outputs of earlier tasks), loaded once and cached.
     .DESCRIPTION
     Reads -Path, then $env:KESTRA_EXECUTION_CONTEXT_FILE, then .kestra-execution-context.json, which the task writes when executionContext is true.
-    Falls back to the base64-encoded $env:KESTRA_CONTEXT. Throws System.IO.FileNotFoundException outside a Kestra task.
+    Without -Path, falls back to the base64-encoded $env:KESTRA_CONTEXT. Throws System.IO.FileNotFoundException outside a Kestra task.
     .EXAMPLE
     (Get-KestraContext).labels.env
     #>
@@ -192,7 +192,7 @@ function Get-KestraContext {
     $file = if ($Path) { $Path } elseif ($env:KESTRA_EXECUTION_CONTEXT_FILE) { $env:KESTRA_EXECUTION_CONTEXT_FILE } else { $ContextFile }
     $json = if (Test-Path -LiteralPath $file -PathType Leaf) {
         Get-Content -LiteralPath $file -Raw -Encoding UTF8
-    } elseif ($env:KESTRA_CONTEXT) {
+    } elseif (-not $Path -and $env:KESTRA_CONTEXT) {
         [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:KESTRA_CONTEXT))
     } else {
         throw [System.IO.FileNotFoundException]::new("No Kestra execution context found: '$file' does not exist and the KESTRA_CONTEXT environment variable is not set. The execution context is only available when the script runs inside a Kestra task.", $file)

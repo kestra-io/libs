@@ -206,6 +206,12 @@ Describe 'Get-KestraContext' {
         (Get-KestraContext).vars.n | Should -Be 42
     }
 
+    It 'does not fall back to KESTRA_CONTEXT for an explicit path' {
+        $env:KESTRA_CONTEXT = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"vars": {"n": 42}}'))
+
+        { Get-KestraContext -Path (Join-Path $TestDrive 'typo.json') } | Should -Throw -ExceptionType ([System.IO.FileNotFoundException])
+    }
+
     It 'throws FileNotFoundException outside a Kestra task' {
         $env:KESTRA_EXECUTION_CONTEXT_FILE = Join-Path $TestDrive 'missing.json'
 
