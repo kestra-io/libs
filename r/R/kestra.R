@@ -94,6 +94,8 @@ Kestra$context <- function(path = NULL) {
     readChar(file, file.size(file), useBytes = TRUE)
   } else if (is.null(path) && nzchar(encoded)) {
     rawToChar(jsonlite::base64_dec(encoded))
+  } else if (!is.null(path)) {
+    stop(sprintf("Kestra execution context file '%s' does not exist.", path), call. = FALSE)
   } else {
     stop(sprintf(paste(
       "No Kestra execution context found: '%s' does not exist and the KESTRA_CONTEXT environment variable is not set.",
