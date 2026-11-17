@@ -237,7 +237,10 @@ Describe 'Get-KestraContext' {
     It 'does not fall back to KESTRA_CONTEXT for an explicit path' {
         $env:KESTRA_CONTEXT = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"vars": {"n": 42}}'))
 
-        { Get-KestraContext -Path (Join-Path $TestDrive 'typo.json') } | Should -Throw -ExceptionType ([System.IO.FileNotFoundException])
+        $typo = Join-Path $TestDrive 'typo.json'
+        $thrown = { Get-KestraContext -Path $typo } | Should -Throw -ExceptionType ([System.IO.FileNotFoundException]) -PassThru
+        $thrown.Exception.Message | Should -BeLike "*$typo*"
+        $thrown.Exception.Message | Should -Not -BeLike '*KESTRA_CONTEXT*'
     }
 
     It 'names the source when the context is not a JSON object' {

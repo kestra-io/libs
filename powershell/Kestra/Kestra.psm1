@@ -212,6 +212,8 @@ function Get-KestraContext {
         Get-Content -LiteralPath $file -Raw -Encoding UTF8
     } elseif (-not $Path -and $env:KESTRA_CONTEXT) {
         [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:KESTRA_CONTEXT))
+    } elseif ($Path) {
+        throw [System.IO.FileNotFoundException]::new("Kestra execution context file '$Path' does not exist.", $Path)
     } else {
         throw [System.IO.FileNotFoundException]::new("No Kestra execution context found: '$file' does not exist and the KESTRA_CONTEXT environment variable is not set. The execution context is only available when the script runs inside a Kestra task.", $file)
     }
