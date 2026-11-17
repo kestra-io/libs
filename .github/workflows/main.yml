@@ -179,6 +179,35 @@ jobs:
           Import-Module Pester -RequiredVersion 5.7.1
           Invoke-Pester -Path ./tests -CI
 
+  go:
+    name: Test Go module (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.21', 'stable']
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -188,6 +217,7 @@ jobs:
       - npm
       - r
       - powershell
+      - go
     steps:
       - name: Create Release
         uses: actions/create-release@v1

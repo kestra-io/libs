@@ -49,6 +49,7 @@ Libraries to interact with metrics and outputs in Kestra script tasks.
 | Node.js | [`javascript/`](javascript/) |
 | R | [`r/`](r/) |
 | PowerShell | [`powershell/`](powershell/) |
+| Go | [`go/`](go/) |
 
 ![Kestra orchestrator](https://kestra.io/video.gif)
 
