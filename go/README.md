@@ -10,6 +10,8 @@ go get github.com/kestra-io/libs/go@main
 go mod tidy
 ```
 
+The `go` tool writes progress such as `go: downloading ...` to stderr, which Kestra logs as ERROR, so the flow below redirects it with `2>&1`.
+
 Pin a release instead of `main` in production flows, so a push to `main` cannot change what runs. Releases are tagged `go/vX.Y.Z`, for example `go get github.com/kestra-io/libs/go@v0.1.0`.
 
 ## Usage
@@ -22,9 +24,9 @@ tasks:
   - id: import
     type: io.kestra.plugin.scripts.go.Script
     beforeCommands:
-      - go mod init flow
-      - go get github.com/kestra-io/libs/go@main
-      - go mod tidy
+      - go mod init flow 2>&1
+      - go get github.com/kestra-io/libs/go@main 2>&1
+      - go mod tidy 2>&1
     script: |
       package main
 
