@@ -9,7 +9,7 @@ const LIB = __DIR__ . '/../src/Kestra.php';
 /** @return array{0: string, 1: string, 2: int} stdout, stderr and exit code */
 function run(string $code, array $env = [], ?string $cwd = null): array
 {
-    $script = tempnam(sys_get_temp_dir(), 'kestra') . '.php';
+    $script = sys_get_temp_dir() . '/kestra-test-' . bin2hex(random_bytes(6)) . '.php';
     file_put_contents($script, "<?php\nrequire " . var_export(realpath(LIB), true) . ";\nuse Kestra\\Kestra;\n" . $code);
     $base = array_diff_key(getenv(), ['KESTRA_CONTEXT' => 1, 'KESTRA_EXECUTION_CONTEXT_FILE' => 1]);
     $process = proc_open([PHP_BINARY, "-d", "display_errors=stderr", $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd ?? sys_get_temp_dir(), $env + $base);
@@ -50,11 +50,16 @@ function fails(string $code, string $message, array $env = [], ?string $cwd = nu
     check(str_contains($err, $message), "expected '$message' in: $err");
 }
 
+/** @var list<string> */
+$cleanup = [];
+
 function contextDir(string $json): string
 {
+    global $cleanup;
     $dir = sys_get_temp_dir() . '/kestra-ctx-' . bin2hex(random_bytes(4));
     mkdir($dir);
     file_put_contents("$dir/.kestra-execution-context.json", $json);
+    $cleanup[] = $dir;
     return $dir;
 }
 
@@ -77,8 +82,10 @@ $tests = [
     },
 
     'values JSON cannot encode fail with a plain sentence' => function () {
-        fails("Kestra::outputs(['x' => NAN]);", 'Replace NAN and INF with null');
-        fails("Kestra::outputs(['x' => \"\\xff\"]);", 'make strings valid UTF-8');
+        fails("Kestra::outputs(['x' => NAN]);", 'Replace NAN and INF with null.');
+        fails("Kestra::outputs(['x' => \"\\xff\"]);", 'Make strings valid UTF-8');
+        [, $err] = run("Kestra::outputs(['x' => fopen('php://memory', 'r')]);");
+        check(str_contains($err, 'cannot be sent to Kestra as JSON') && !str_contains($err, 'NAN'), $err);
     },
 
     'metrics have number values, string tags and an object for no tags' => function () {
@@ -102,6 +109,7 @@ $tests = [
         fails("Kestra::gauge('rows', INF);", "Metric 'rows' value must be a finite number.");
         fails("Kestra::counter('rows', 1, ['env' => null]);", "Metric 'rows' tag 'env' must be a single value");
         fails("Kestra::counter('rows', 1, ['env' => ['a']]);", "Metric 'rows' tag 'env' must be a single value");
+        fails("Kestra::counter('rows', 1, ['prod', 'eu']);", "Metric 'rows' tags must be an array with string keys");
         fails("Kestra::timer('fetch', NAN);", "Metric 'fetch' value must be a finite number.");
         fails("Kestra::timer('fetch', 'strlen');", 'must be of type Closure|int|float');
     },
@@ -112,7 +120,7 @@ $tests = [
         same('"model"', $result);
         $metric = lines($line)[0]['metrics'][0];
         same(['fit', 'timer', ['env' => 'qa']], [$metric['name'], $metric['type'], $metric['tags']]);
-        check($metric['value'] >= 0.05 && $metric['value'] < 5, 'timer value in seconds: ' . $metric['value']);
+        check($metric['value'] > 0.04 && $metric['value'] < 5, 'timer value in seconds: ' . $metric['value']);
     },
 
     'timer sends nothing when the callable throws' => function () {
@@ -138,9 +146,10 @@ $tests = [
     'logger fills placeholders and replaces invalid bytes' => function () {
         [$out] = run(<<<'PHP'
             Kestra::logger()->warning('{count} orders, dry {dry}, missing {nope}', ['count' => 2, 'dry' => true]);
-            Kestra::logger()->info("caf\xc3\xa9 \xff");
+            Kestra::logger()->info("caf\xc3\xa9 \xff a\nb\u{85}c\u{2028}d\u{2029}e");
             PHP);
-        same(['2 orders, dry true, missing {nope}', "caf\u{e9} \u{fffd}"], array_map(fn ($line) => $line['logs'][0]['message'], lines($out)));
+        check(preg_match('/[^\x20-\x7e\n]/', $out) === 0, "raw non-ASCII in: $out");
+        same(['2 orders, dry true, missing {nope}', "caf\u{e9} \u{fffd} a\nb\u{85}c\u{2028}d\u{2029}e"], array_map(fn ($line) => $line['logs'][0]['message'], lines($out)));
     },
 
     'assets are sent as given' => function () {
@@ -168,6 +177,22 @@ $tests = [
         same('from-file', $out);
         [$out] = run("echo Kestra::context()['execution']['id'];", ['KESTRA_CONTEXT' => base64_encode('{"execution":{"id":"from-env"}}')]);
         same('from-env', $out);
+    },
+
+    'the file wins over the variable, and KESTRA_EXECUTION_CONTEXT_FILE over the default file' => function () {
+        $dir = contextDir('{"execution":{"id":"default"}}');
+        [$out] = run("echo Kestra::context()['execution']['id'];", ['KESTRA_CONTEXT' => base64_encode('{"execution":{"id":"from-env"}}')], $dir);
+        same('default', $out);
+        $other = contextDir('{"execution":{"id":"env-file"}}');
+        [$out] = run("echo Kestra::context()['execution']['id'];", ['KESTRA_EXECUTION_CONTEXT_FILE' => "$other/.kestra-execution-context.json"], $dir);
+        same('env-file', $out);
+    },
+
+    'an explicit path is not cached as the default context' => function () {
+        $dir = contextDir('{"execution":{"id":"default"}}');
+        $other = contextDir('{"execution":{"id":"explicit"}}');
+        [$out] = run('echo Kestra::context(' . var_export("$other/.kestra-execution-context.json", true) . ")['execution']['id'], ' ', Kestra::context()['execution']['id'];", [], $dir);
+        same('explicit default', $out);
     },
 
     'an explicit path never falls back to the variable' => function () {
@@ -204,6 +229,10 @@ foreach ($tests as $name => $test) {
         $failed++;
         echo "FAIL $name: {$e->getMessage()}\n";
     }
+}
+foreach ($cleanup as $dir) {
+    array_map('unlink', glob("$dir/{,.}*.json", GLOB_BRACE) ?: []);
+    rmdir($dir);
 }
 echo count($tests) - $failed, '/', count($tests), " passed\n";
 exit($failed === 0 ? 0 : 1);

@@ -47,6 +47,6 @@ tasks:
 | `Kestra::gauge($name, $value, $tags = [])` | Gauge metric |
 | `Kestra::timer($name, $seconds, $tags = [])` or `Kestra::timer($name, fn () => ...)` | Timer metric. A Closure is timed and its result returned |
 | `Kestra::logger()->trace/debug/info/notice/warning/error/critical/alert/emergency($message, $context = [])` | Log line at that level. `notice` is sent as INFO, `critical`, `alert` and `emergency` as ERROR |
-| `Kestra::context(?string $path = null)` | The execution context as an array, for example `Kestra::context()['labels']`. Needs `executionContext: true` on the task |
+| `Kestra::context(?string $path = null)` | The execution context as an array, for example `Kestra::context()['labels']`. Needs `executionContext: true` on the task. Without `$path`, falls back to the base64 `KESTRA_CONTEXT` variable. A `$path` that does not exist throws |
 
-Metric tags are sent as strings, and invalid bytes in a log message become U+FFFD. The logger has the PSR-3 methods and fills `{placeholders}` from `$context`, but does not implement `Psr\Log\LoggerInterface`, so the library needs no dependency. An empty array nested in outputs is sent as `[]`, since PHP cannot tell an empty list from an empty map.
+Metric tags are sent as strings, and invalid bytes in a log message become U+FFFD. The logger has the PSR-3 methods and fills `{placeholders}` from `$context`, but does not implement `Psr\Log\LoggerInterface`, so the library needs no dependency. An empty array nested in outputs is sent as `[]`, since PHP cannot tell an empty list from an empty map. Objects are sent as their public properties unless they implement `JsonSerializable`, so format a `DateTime` with `format()` first.

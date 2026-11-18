@@ -14,12 +14,13 @@ final class Kestra
 
     private static ?Logger $logger = null;
     private static ?string $contextJson = null;
+    /** @var resource|null */
+    private static $stdout = null;
 
     /** @param array<string, mixed> $map */
-    public static function format(array $map, int $flags = 0): string
+    public static function format(array $map): string
     {
-        // Non-ASCII is escaped, which covers U+0085, U+2028 and U+2029: Java treats them as line terminators.
-        return '::' . json_encode($map, $flags | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . '::';
+        return self::encode($map, 0);
     }
 
     /** @param array<string, mixed> $outputs */
@@ -115,18 +116,45 @@ final class Kestra
         return json_decode($json, true);
     }
 
+    /** @internal Used by Logger. Invalid bytes in the message become U+FFFD, so a log call never fails. */
+    public static function sendLog(string $level, string $message): void
+    {
+        if (!in_array($level, ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'], true)) {
+            throw new \InvalidArgumentException("Log level '$level' is not a Kestra level.");
+        }
+        self::write(self::encode(['logs' => [['level' => $level, 'message' => $message]]], JSON_INVALID_UTF8_SUBSTITUTE));
+    }
+
     /** @param array<string, mixed> $map */
-    public static function send(array $map, int $flags = 0): void
+    private static function encode(array $map, int $flags): string
+    {
+        // Non-ASCII is escaped, which covers U+0085, U+2028 and U+2029: Java treats them as line terminators.
+        return '::' . json_encode($map, $flags | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . '::';
+    }
+
+    /** @param array<string, mixed> $map */
+    private static function send(array $map): void
     {
         try {
-            $line = self::format($map, $flags) . "\n";
+            $line = self::format($map);
         } catch (\JsonException $e) {
-            throw new \InvalidArgumentException("This value cannot be sent to Kestra as JSON ({$e->getMessage()}). "
-                . 'Replace NAN and INF with null, and make strings valid UTF-8, for example with mb_scrub().', 0, $e);
+            $hint = match ($e->getCode()) {
+                JSON_ERROR_INF_OR_NAN => ' Replace NAN and INF with null.',
+                JSON_ERROR_UTF8 => ' Make strings valid UTF-8, for example with mb_scrub().',
+                default => '',
+            };
+            throw new \InvalidArgumentException("This value cannot be sent to Kestra as JSON ({$e->getMessage()}).$hint", 0, $e);
         }
+        self::write($line);
+    }
+
+    private static function write(string $line): void
+    {
+        // STDOUT is not defined when the script is piped to php on stdin.
+        self::$stdout ??= defined('STDOUT') ? STDOUT : fopen('php://stdout', 'w');
         // One write per line, flushed, so Kestra gets each line when it is written and not at exit.
-        fwrite(STDOUT, $line);
-        fflush(STDOUT);
+        fwrite(self::$stdout, $line . "\n");
+        fflush(self::$stdout);
     }
 
     /** @param array<string, mixed> $tags */
@@ -137,6 +165,9 @@ final class Kestra
         }
         if (!(is_int($value) || is_float($value)) || !is_finite((float) $value)) {
             throw new \InvalidArgumentException("Metric '$name' value must be a finite number.");
+        }
+        if ($tags !== [] && array_is_list($tags)) {
+            throw new \InvalidArgumentException("Metric '$name' tags must be an array with string keys, for example ['env' => 'prod'].");
         }
         $stringTags = [];
         foreach ($tags as $key => $tag) {
@@ -179,8 +210,7 @@ final class Logger
                 $replace['{' . $key . '}'] = is_bool($value) ? var_export($value, true) : (string) $value;
             }
         }
-        // Invalid bytes become U+FFFD, so a log call never fails.
-        Kestra::send(['logs' => [['level' => $kestraLevel, 'message' => strtr((string) $message, $replace)]]], JSON_INVALID_UTF8_SUBSTITUTE);
+        Kestra::sendLog($kestraLevel, strtr((string) $message, $replace));
     }
 
     /** @param array<string, mixed> $context */
