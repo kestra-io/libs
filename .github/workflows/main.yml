@@ -281,6 +281,26 @@ jobs:
       - name: Test
         run: prove -lv t
 
+  lua:
+    name: Test Lua module (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 5.3 is the first version with integers.
+        image: ['nickblah/lua:5.1', 'nickblah/lua:5.3', 'nickblah/lua:latest', 'nickblah/luajit:latest']
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        working-directory: lua
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        run: $(command -v lua || command -v luajit) test/kestra_test.lua
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -294,6 +314,7 @@ jobs:
       - ruby
       - php
       - perl
+      - lua
     steps:
       - name: Create Release
         uses: actions/create-release@v1
