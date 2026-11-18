@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from kestra import Kestra
 
@@ -267,3 +269,135 @@ def test_multiple_metrics(monkeypatch):
         }
     ]
     assert calls == expected_calls
+
+
+def test_timer_metric_with_callable(monkeypatch):
+    """Test timer metric when passed a callable."""
+    calls = []
+
+    def mock_send(data):
+        calls.append(data)
+
+    monkeypatch.setattr(Kestra, "_send", mock_send)
+
+    def work():
+        time.sleep(0.01)
+        return "result_value"
+
+    result = Kestra.timer("timed_work", work, {"op": "work"})
+
+    assert result == "result_value"
+    assert len(calls) == 1
+    metric = calls[0]["metrics"][0]
+    assert metric["name"] == "timed_work"
+    assert metric["type"] == "timer"
+    assert metric["tags"] == {"op": "work"}
+    assert isinstance(metric["value"], float)
+    assert metric["value"] >= 0.01
+
+
+def test_timer_metric_with_callable_exception(monkeypatch):
+    """Test timer metric does not send metric when callable raises."""
+    calls = []
+
+    def mock_send(data):
+        calls.append(data)
+
+    monkeypatch.setattr(Kestra, "_send", mock_send)
+
+    def failing_work():
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        Kestra.timer("failing", failing_work)
+
+    assert calls == []
+
+
+def test_metric_validation_empty_or_non_string_name():
+    """Test metric name validation."""
+    with pytest.raises(ValueError, match="Metric name must be a non-empty string"):
+        Kestra.counter("", 1)
+
+    with pytest.raises(ValueError, match="Metric name must be a non-empty string"):
+        Kestra.gauge(None, 1)
+
+
+def test_metric_validation_non_finite_value():
+    """Test metric rejects NaN, Inf, and non-numeric values."""
+    with pytest.raises(ValueError, match="value must be a finite number"):
+        Kestra.counter("count", float("nan"))
+
+    with pytest.raises(ValueError, match="value must be a finite number"):
+        Kestra.gauge("temp", float("inf"))
+
+    with pytest.raises(ValueError, match="value must be a finite number"):
+        Kestra.timer("dur", float("-inf"))
+
+    with pytest.raises(ValueError, match="value must be a finite number"):
+        Kestra.counter("count", True)
+
+    with pytest.raises(ValueError, match="value must be a finite number"):
+        Kestra.counter("count", "123")
+
+
+def test_metric_tags_validation(monkeypatch):
+    """Test metric tags validation and stringification."""
+    calls = []
+
+    def mock_send(data):
+        calls.append(data)
+
+    monkeypatch.setattr(Kestra, "_send", mock_send)
+
+    with pytest.raises(ValueError, match="tags must be a dictionary"):
+        Kestra.counter("test", 1, tags="not-a-dict")
+
+    with pytest.raises(ValueError, match="must be a single value"):
+        Kestra.counter("test", 1, tags={"nested": {"a": "b"}})
+
+    with pytest.raises(ValueError, match="must be a single value"):
+        Kestra.counter("test", 1, tags={"list": [1, 2]})
+
+    # Primitive values like ints should be converted to strings
+    Kestra.counter("test", 1, tags={"port": 8080, "env": "prod"})
+    assert calls[0]["metrics"][0]["tags"] == {"port": "8080", "env": "prod"}
+
+
+def test_outputs_valid(monkeypatch):
+    """Test outputs functionality."""
+    calls = []
+
+    def mock_send(data):
+        calls.append(data)
+
+    monkeypatch.setattr(Kestra, "_send", mock_send)
+
+    Kestra.outputs({"status": 200, "message": "done"})
+    assert calls == [{"outputs": {"status": 200, "message": "done"}}]
+
+
+def test_outputs_empty_or_invalid():
+    """Test outputs validation."""
+    with pytest.raises(ValueError, match="Outputs must be a non-empty dictionary"):
+        Kestra.outputs({})
+
+    with pytest.raises(ValueError, match="Outputs must be a non-empty dictionary"):
+        Kestra.outputs("invalid")
+
+
+def test_send_flushes_stdout(monkeypatch):
+    """Test that _send calls print with flush=True."""
+    printed = []
+
+    def mock_print(*args, **kwargs):
+        printed.append((args, kwargs))
+
+    monkeypatch.setattr("builtins.print", mock_print)
+
+    Kestra._send({"test": "value"})
+
+    assert len(printed) == 1
+    args, kwargs = printed[0]
+    assert args == ('::{"test": "value"}::',)
+    assert kwargs.get("flush") is True

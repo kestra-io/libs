@@ -4,7 +4,7 @@ from kestra import Kestra
 
 
 def test_assets(monkeypatch):
-    """Test counter metric functionality."""
+    """Test assets functionality."""
     calls = []
 
     def mock_send(data):
@@ -42,3 +42,12 @@ def test_assets(monkeypatch):
         }
     }
     assert calls == [expected_call]
+
+
+def test_assets_empty_or_invalid():
+    """Test that assets rejects empty or non-dict inputs."""
+    with pytest.raises(ValueError, match="Assets must be a non-empty dictionary"):
+        Kestra.assets({})
+
+    with pytest.raises(ValueError, match="Assets must be a non-empty dictionary"):
+        Kestra.assets("not-a-dict")

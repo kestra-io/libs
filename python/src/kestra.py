@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -71,7 +72,7 @@ class Kestra:
         Args:
             map_ (dict): The message to send to the Kestra server.
         """
-        print(Kestra.format(map_))
+        print(Kestra.format(map_), flush=True)
 
     @staticmethod
     def format(map_: dict):
@@ -91,18 +92,43 @@ class Kestra:
     def _metrics(
         name: str,
         type_: str,
-        value: int,
-        tags: dict | None = None,
+        value: int | float,
+        tags: Mapping | None = None,
     ):
         """
-        Send a metrics to the Kestra server.
+        Send a metric to the Kestra server.
 
         Args:
             name (str): The name of the metric.
             type_ (str): The type of the metric.
-            value (int): The value of the metric.
-            tags (dict): The tags of the metric.
+            value (int | float): The value of the metric.
+            tags (Mapping, optional): The tags of the metric.
         """
+        if not isinstance(name, str) or not name:
+            raise ValueError("Metric name must be a non-empty string.")
+
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError(f"Metric '{name}' value must be a finite number.")
+
+        string_tags = {}
+        if tags is not None:
+            if not isinstance(tags, Mapping):
+                raise ValueError(
+                    f"Metric '{name}' tags must be a dictionary, "
+                    "for example tags={'env': 'prod'}."
+                )
+            for k, v in tags.items():
+                if v is None or isinstance(v, (dict, list, set, tuple)):
+                    raise ValueError(
+                        f"Metric '{name}' tag '{k}' must be a single value, "
+                        "for example tags={'env': 'prod'}."
+                    )
+                string_tags[str(k)] = str(v)
+
         Kestra._send(
             {
                 "metrics": [
@@ -110,14 +136,14 @@ class Kestra:
                         "name": name,
                         "type": type_,
                         "value": value,
-                        "tags": tags or {},
+                        "tags": string_tags,
                     }
                 ]
             }
         )
 
     @staticmethod
-    def outputs(map_: dict):
+    def outputs(map_: Mapping):
         """
         The `Kestra` class provides a method to send key-value-based outputs to
         the Kestra server. If you want to output large objects, write them to a
@@ -125,26 +151,36 @@ class Kestra:
         script task.
 
         Args:
-            map_ (dict): The outputs to send to the Kestra server.
+            map_ (Mapping): The outputs to send to the Kestra server.
         """
-        Kestra._send({"outputs": map_})
+        if not isinstance(map_, Mapping) or len(map_) == 0:
+            raise ValueError(
+                "Outputs must be a non-empty dictionary, "
+                "for example Kestra.outputs({'rows': 42})."
+            )
+        Kestra._send({"outputs": dict(map_)})
 
     @staticmethod
-    def assets(map_: dict):
+    def assets(map_: Mapping):
         """
-        The `Kestra` class provides a method to send a full asset to
-        the Kestra server.
+        The `Kestra` class provides a method to send the assets a script reads
+        and writes to the Kestra server.
 
         Args:
-            map_ (dict): The full asset properties to send to the Kestra server.
+            map_ (Mapping): The full asset properties to send to the Kestra server.
         """
-        Kestra._send({"assets": map_})
+        if not isinstance(map_, Mapping) or len(map_) == 0:
+            raise ValueError(
+                "Assets must be a non-empty dictionary, for example "
+                "Kestra.assets({'outputs': [{'id': 'sales.orders', 'type': 'TABLE'}]})."
+            )
+        Kestra._send({"assets": dict(map_)})
 
     @staticmethod
     def counter(
         name: str,
-        value: int,
-        tags: dict | None = None,
+        value: int | float,
+        tags: Mapping | None = None,
     ):
         """
         The `Kestra` class provides a method to send counter metrics to the Kestra
@@ -152,50 +188,56 @@ class Kestra:
 
         Args:
             name (str): The name of the counter.
-            value (int): The value of the counter.
-            tags (dict): The tags of the counter (optional).
+            value (int | float): The value of the counter.
+            tags (Mapping, optional): The tags of the counter.
         """
         Kestra._metrics(name, "counter", value, tags)
 
     @staticmethod
     def timer(
         name: str,
-        duration: int | Callable,
-        tags: dict | None = None,
+        duration: int | float | Callable,
+        tags: Mapping | None = None,
     ):
         """
         The `Kestra` class provides a method to send timer metrics to the Kestra server.
 
         Args:
             name (str): The name of the timer.
-            duration (int | Callable): The duration of the timer.
-            tags (dict): The tags of the timer (optional).
+            duration (int | float | Callable): The duration of the timer in
+                seconds, or a callable whose execution is timed and whose return
+                value is returned.
+            tags (Mapping, optional): The tags of the timer.
+
+        Returns:
+            Any: The return value of duration() if duration is callable, otherwise None.
         """
         if callable(duration):
-            start = datetime.now()
-            duration()
+            start = time.perf_counter()
+            result = duration()
             Kestra._metrics(
                 name,
                 "timer",
-                (datetime.now().microsecond - start.microsecond) / 1000,
+                time.perf_counter() - start,
                 tags,
             )
+            return result
         else:
             Kestra._metrics(name, "timer", duration, tags)
 
     @staticmethod
     def gauge(
         name: str,
-        value: float,
-        tags: dict | None = None,
+        value: int | float,
+        tags: Mapping | None = None,
     ):
         """
         The `Kestra` class provides a method to send gauge metrics to the Kestra server.
 
         Args:
             name (str): The name of the gauge.
-            value (float): The value of the gauge.
-            tags (dict): The tags of the gauge (optional).
+            value (int | float): The value of the gauge.
+            tags (Mapping, optional): The tags of the gauge.
         """
         Kestra._metrics(name, "gauge", value, tags)
 
