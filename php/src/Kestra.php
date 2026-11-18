@@ -13,7 +13,8 @@ final class Kestra
     public const CONTEXT_FILE = '.kestra-execution-context.json';
 
     private static ?Logger $logger = null;
-    private static ?string $contextJson = null;
+    /** @var array<string, mixed>|null */
+    private static ?array $context = null;
     /** @var resource|null */
     private static $stdout = null;
 
@@ -38,6 +39,12 @@ final class Kestra
         if ($assets === [] || array_is_list($assets)) {
             throw new \InvalidArgumentException("Assets must be a non-empty array with string keys, for example Kestra::assets(['outputs' => [['id' => 'sales.orders', 'type' => 'TABLE']]]).");
         }
+        // Asset metadata is a map in Kestra, and PHP sends an empty array as [].
+        foreach ($assets['outputs'] ?? [] as $i => $asset) {
+            if (is_array($asset) && ($asset['metadata'] ?? null) === []) {
+                $assets['outputs'][$i]['metadata'] = new \stdClass();
+            }
+        }
         self::send(['assets' => $assets]);
     }
 
@@ -59,7 +66,7 @@ final class Kestra
      *
      * @param array<string, mixed> $tags
      */
-    public static function timer(string $name, int|float|\Closure $secondsOrClosure, array $tags = []): mixed
+    public static function timer(string $name, mixed $secondsOrClosure, array $tags = []): mixed
     {
         if (!$secondsOrClosure instanceof \Closure) {
             self::sendMetric($name, 'timer', $secondsOrClosure, $tags);
@@ -86,8 +93,8 @@ final class Kestra
      */
     public static function context(?string $path = null): array
     {
-        if ($path === null && self::$contextJson !== null) {
-            return json_decode(self::$contextJson, true);
+        if ($path === null && self::$context !== null) {
+            return self::$context;
         }
 
         $envFile = (string) getenv('KESTRA_EXECUTION_CONTEXT_FILE');
@@ -110,18 +117,16 @@ final class Kestra
         if (!is_string($json) || !(json_decode($json) instanceof \stdClass)) {
             throw new \UnexpectedValueException("The execution context in $source is not a JSON object.");
         }
+        $context = json_decode($json, true);
         if ($path === null) {
-            self::$contextJson = $json;
+            self::$context = $context;
         }
-        return json_decode($json, true);
+        return $context;
     }
 
     /** @internal Used by Logger. Invalid bytes in the message become U+FFFD, so a log call never fails. */
     public static function sendLog(string $level, string $message): void
     {
-        if (!in_array($level, ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'], true)) {
-            throw new \InvalidArgumentException("Log level '$level' is not a Kestra level.");
-        }
         self::write(self::encode(['logs' => [['level' => $level, 'message' => $message]]], JSON_INVALID_UTF8_SUBSTITUTE));
     }
 
@@ -129,7 +134,7 @@ final class Kestra
     private static function encode(array $map, int $flags): string
     {
         // Non-ASCII is escaped, which covers U+0085, U+2028 and U+2029: Java treats them as line terminators.
-        return '::' . json_encode($map, $flags | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . '::';
+        return '::' . json_encode($map, $flags | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR) . '::';
     }
 
     /** @param array<string, mixed> $map */
@@ -210,7 +215,12 @@ final class Logger
                 $replace['{' . $key . '}'] = is_bool($value) ? var_export($value, true) : (string) $value;
             }
         }
-        Kestra::sendLog($kestraLevel, strtr((string) $message, $replace));
+        $text = strtr((string) $message, $replace);
+        // PSR-3 passes exceptions under the "exception" key.
+        if (($context['exception'] ?? null) instanceof \Throwable && !str_contains((string) $message, '{exception}')) {
+            $text .= "\n" . $context['exception'];
+        }
+        Kestra::sendLog($kestraLevel, $text);
     }
 
     /** @param array<string, mixed> $context */

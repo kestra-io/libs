@@ -7,12 +7,13 @@ declare(strict_types=1);
 const LIB = __DIR__ . '/../src/Kestra.php';
 
 /** @return array{0: string, 1: string, 2: int} stdout, stderr and exit code */
-function run(string $code, array $env = [], ?string $cwd = null): array
+function run(string $code, array $env = [], ?string $cwd = null, bool $isStdin = false): array
 {
     $script = sys_get_temp_dir() . '/kestra-test-' . bin2hex(random_bytes(6)) . '.php';
     file_put_contents($script, "<?php\nrequire " . var_export(realpath(LIB), true) . ";\nuse Kestra\\Kestra;\n" . $code);
     $base = array_diff_key(getenv(), ['KESTRA_CONTEXT' => 1, 'KESTRA_EXECUTION_CONTEXT_FILE' => 1]);
-    $process = proc_open([PHP_BINARY, "-d", "display_errors=stderr", $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd ?? sys_get_temp_dir(), $env + $base);
+    $command = $isStdin ? [PHP_BINARY, '-d', 'display_errors=stderr'] : [PHP_BINARY, '-d', 'display_errors=stderr', $script];
+    $process = proc_open($command, [0 => $isStdin ? ['file', $script, 'r'] : ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd ?? sys_get_temp_dir(), $env + $base);
     $out = stream_get_contents($pipes[1]);
     $err = stream_get_contents($pipes[2]);
     $exit = proc_close($process);
@@ -69,6 +70,16 @@ $tests = [
         same([['outputs' => ['rows' => 42, 'model' => ['type' => 'lm', 'r2' => 0.65], 'empty' => null]]], lines($out));
     },
 
+    'zero-fraction floats stay floats' => function () {
+        [$out] = run("Kestra::outputs(['ratio' => 1.0]); Kestra::gauge('g', 2.0);");
+        check(str_contains($out, '"ratio":1.0') && str_contains($out, '"value":2.0'), $out);
+    },
+
+    'a script piped to php on stdin, where STDOUT may be undefined, still sends lines' => function () {
+        [$out] = run("Kestra::outputs(['a' => 1]);", [], null, true);
+        same([['outputs' => ['a' => 1]]], lines($out));
+    },
+
     'multi-line strings, Java line terminators and non-ASCII stay on one line' => function () {
         [$out] = run('Kestra::outputs(["note" => "a\nb\u{85}c\u{2028}d\u{2029}e caf\u{e9} \u{1F600}"]);');
         same(1, substr_count($out, "\n"));
@@ -111,7 +122,9 @@ $tests = [
         fails("Kestra::counter('rows', 1, ['env' => ['a']]);", "Metric 'rows' tag 'env' must be a single value");
         fails("Kestra::counter('rows', 1, ['prod', 'eu']);", "Metric 'rows' tags must be an array with string keys");
         fails("Kestra::timer('fetch', NAN);", "Metric 'fetch' value must be a finite number.");
-        fails("Kestra::timer('fetch', 'strlen');", 'must be of type Closure|int|float');
+        fails("Kestra::timer('fetch', 'strlen');", "Metric 'fetch' value must be a finite number.");
+        fails("Kestra::timer('fetch', '2.5');", "Metric 'fetch' value must be a finite number.");
+        fails("Kestra::timer('fetch', true);", "Metric 'fetch' value must be a finite number.");
     },
 
     'timer times a callable and returns its result' => function () {
@@ -152,13 +165,26 @@ $tests = [
         same(['2 orders, dry true, missing {nope}', "caf\u{e9} \u{fffd} a\nb\u{85}c\u{2028}d\u{2029}e"], array_map(fn ($line) => $line['logs'][0]['message'], lines($out)));
     },
 
+    'logger appends a PSR-3 exception from the context' => function () {
+        [$out] = run("Kestra::logger()->error('Import failed', ['exception' => new RuntimeException('db down')]);");
+        $message = lines($out)[0]['logs'][0]['message'];
+        check(str_starts_with($message, "Import failed\nRuntimeException: db down"), $message);
+        [$out] = run("Kestra::logger()->error('Failed: {exception}', ['exception' => new RuntimeException('db down')]);");
+        same(1, substr_count(lines($out)[0]['logs'][0]['message'], 'db down'));
+    },
+
+    'empty asset metadata is sent as an object' => function () {
+        [$out] = run("Kestra::assets(['outputs' => [['id' => 'x', 'type' => 'TABLE', 'metadata' => []]]]);");
+        check(str_contains($out, '"metadata":{}'), $out);
+    },
+
     'assets are sent as given' => function () {
         [$out] = run("Kestra::assets(['inputs' => [['id' => 'raw.orders']], 'outputs' => [['id' => 'sales.orders', 'type' => 'TABLE', 'metadata' => ['rows' => 120]]]]);");
         same([['assets' => ['inputs' => [['id' => 'raw.orders']], 'outputs' => [['id' => 'sales.orders', 'type' => 'TABLE', 'metadata' => ['rows' => 120]]]]]], lines($out));
         fails('Kestra::assets([]);', 'Assets must be a non-empty array with string keys');
     },
 
-    'context is read from the default file once and each call returns a copy' => function () {
+    'context is read from the default file once' => function () {
         $dir = contextDir('{"execution":{"id":"e1"},"labels":{"team":"data"}}');
         [$out] = run(<<<'PHP'
             $first = Kestra::context();
@@ -191,8 +217,9 @@ $tests = [
     'an explicit path is not cached as the default context' => function () {
         $dir = contextDir('{"execution":{"id":"default"}}');
         $other = contextDir('{"execution":{"id":"explicit"}}');
-        [$out] = run('echo Kestra::context(' . var_export("$other/.kestra-execution-context.json", true) . ")['execution']['id'], ' ', Kestra::context()['execution']['id'];", [], $dir);
-        same('explicit default', $out);
+        $explicit = var_export("$other/.kestra-execution-context.json", true);
+        [$out] = run("echo Kestra::context($explicit)['execution']['id'], ' ', Kestra::context()['execution']['id'], ' ', Kestra::context($explicit)['execution']['id'];", [], $dir);
+        same('explicit default explicit', $out);
     },
 
     'an explicit path never falls back to the variable' => function () {
