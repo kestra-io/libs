@@ -18,7 +18,7 @@ Use the language's own idioms for the API (a `Logger` in Ruby, `slog` in Go, `Ve
 
 ## Execution context
 
-Read `path`, then `KESTRA_EXECUTION_CONTEXT_FILE` (empty counts as unset), then `.kestra-execution-context.json`, which the task writes when `executionContext: true`. Only without `path`, fall back to the base64-encoded `KESTRA_CONTEXT` variable: a `path` that does not exist always fails, so a typo is never hidden. Load lazily, cache the default context, and fail with a clear error outside a Kestra task, using the language's "file not found" error where it has one.
+Read `path` (empty counts as unset), then `KESTRA_EXECUTION_CONTEXT_FILE` (empty counts as unset), then `.kestra-execution-context.json`, which the task writes when `executionContext: true`. Only without `path`, fall back to the base64-encoded `KESTRA_CONTEXT` variable: a `path` that does not exist always fails, so a typo is never hidden. Only a missing file falls back: a directory or an unreadable file fails with its read error. Fail with distinct messages when `KESTRA_CONTEXT` is not base64, when the content is not valid JSON, and when it is JSON but not an object. Load lazily, cache the default context, and fail with a clear error outside a Kestra task, using the language's "file not found" error where it has one.
 
 ## Line format
 
