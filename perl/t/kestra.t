@@ -76,12 +76,14 @@ subtest 'outputs are one line with nested values' => sub {
 subtest 'multi-line strings, Java line terminators and non-ASCII stay on one ASCII line' => sub {
     my $text = "a\nb\x{85}c\x{2028}d\x{2029}e caf\x{e9} \x{1F600}";
     my $bytes = "caf\xc3\xa9";
-    my $out = capture(sub { Kestra->outputs({ text => $text, bytes => $bytes }) });
+    my $out = capture(sub { Kestra->outputs({ text => $text, bytes => $bytes, $bytes => 'key' }) });
     is(($out =~ tr/\n//), 1, 'one line');
     unlike($out, qr/[^\x20-\x7e\n]/, 'only ASCII');
     my ($line) = lines($out);
     is($line->{outputs}{text}, $text);
     is($line->{outputs}{bytes}, "caf\x{e9}", 'UTF-8 bytes are read as UTF-8');
+    is($line->{outputs}{"caf\x{e9}"}, 'key', 'in hash keys too');
+    like(Kestra->format({ outputs => { bytes => $bytes } }), qr/caf\\u00e9/, 'format reads them the same way');
 };
 
 subtest 'outputs must be a non-empty hash reference' => sub {
@@ -94,6 +96,11 @@ subtest 'values JSON cannot carry fail with a plain sentence' => sub {
     dies_with(sub { Kestra->outputs({ x => -sin(9**9**9) }) }, 'Replace NaN and Inf with undef.');
     dies_with(sub { Kestra->outputs({ x => "\xff" }) }, 'a string is not valid UTF-8');
     dies_with(sub { Kestra->outputs({ x => sub { 1 } }) }, 'CODE is not a hash, array, string, number or boolean.');
+    dies_with(sub { Kestra->outputs({ x => \'hello' }) }, 'SCALAR is not a hash, array, string, number or boolean.');
+    dies_with(sub { Kestra->outputs({ x => "a\x{D800}b" }) }, 'a string is not valid UTF-8');
+    my $self = { a => 1 };
+    $self->{self} = $self;
+    dies_with(sub { Kestra->outputs($self) }, 'nested more than 512 levels deep or contains itself.');
 };
 
 subtest 'numbers stay numbers and booleans stay booleans' => sub {
@@ -113,6 +120,9 @@ subtest 'metrics have number values, string tags and an object for no tags' => s
         { metrics => [{ name => 'fetch', type => 'timer', value => 2, tags => {} }] },
     ]);
     like(capture(sub { Kestra->gauge('queue', '1.5') }), qr/"tags":\{\},"type":"gauge","value":1\.5\}/, 'value is a JSON number');
+    my $out = capture(sub { Kestra->counter(42, 1, { batch => 7, "caf\xc3\xa9" => "caf\xc3\xa9", dry => JSON::PP::false, wet => \1 }) });
+    like($out, qr/"name":"42"/, 'name is a string');
+    like($out, qr/"batch":"7","caf\\u00e9":"caf\\u00e9","dry":"false","wet":"true"/, 'tags are strings and UTF-8 bytes are read as UTF-8');
 };
 
 subtest 'metrics reject invalid input' => sub {
@@ -156,14 +166,18 @@ subtest 'logger maps Log4perl levels to Kestra levels and joins arguments' => su
         [[TRACE => 'trace'], [DEBUG => 'debug'], [INFO => 'info'], [WARN => 'warn'], [ERROR => 'error'], [ERROR => 'fatal'], [INFO => 'rows: 3 done']]);
 };
 
-subtest 'logger reads UTF-8 bytes, replaces invalid bytes and escapes terminators' => sub {
-    my $out = capture(sub { Kestra->logger->info("caf\xc3\xa9 \xff"); Kestra->logger->info("a\x{85}b\x{2028}c\x{2029}d \x{e9}") });
+subtest 'logger reads UTF-8 bytes, replaces what JSON cannot carry and escapes terminators' => sub {
+    my $out = capture(sub {
+        Kestra->logger->info("caf\xc3\xa9 \xff");
+        Kestra->logger->info("a\x{85}b\x{2028}c\x{2029}d \x{e9}");
+        Kestra->logger->info("x\x{D800}y\x{110000}z");
+    });
     unlike($out, qr/[^\x20-\x7e\n]/, 'only ASCII');
-    is_deeply([map { $_->{logs}[0]{message} } lines($out)], ["caf\x{e9} \x{fffd}", "a\x{85}b\x{2028}c\x{2029}d \x{e9}"]);
+    is_deeply([map { $_->{logs}[0]{message} } lines($out)], ["caf\x{e9} \x{fffd}", "a\x{85}b\x{2028}c\x{2029}d \x{e9}", "x\x{fffd}y\x{fffd}z"]);
 };
 
-subtest 'output separators set by the script do not change the line' => sub {
-    my $out = capture(sub { local ($\, $,) = ("!\n", '|'); Kestra->outputs({ a => 1 }) });
+subtest 'an output record separator set by the script does not change the line' => sub {
+    my $out = capture(sub { local $\ = "!\n"; Kestra->outputs({ a => 1 }) });
     is($out, qq(::{"outputs":{"a":1}}::\n));
 };
 
@@ -186,8 +200,8 @@ subtest 'assets are sent as given' => sub {
 };
 
 subtest 'context is read from the default file once and each call returns a new hash' => sub {
-    my $dir = context_dir('{"execution":{"id":"e1"},"labels":{"team":"caf\u00e9"}}');
-    my ($out) = run_perl(qq(chdir '$dir'; binmode STDOUT, ':utf8'; my \$c = Kestra->context; \$c->{labels} = {}; unlink \$Kestra::CONTEXT_FILE; print Kestra->context->{labels}{team}, ' ', Kestra->context->{execution}{id};));
+    my $dir = context_dir(qq({"execution":{"id":"e1"},"labels":{"team":"caf\xc3\xa9"}}));
+    my ($out) = run_perl(qq(chdir '$dir'; binmode STDOUT, ':utf8'; Kestra->context; unlink \$Kestra::CONTEXT_FILE; Kestra->context->{labels} = {}; print Kestra->context->{labels}{team}, ' ', Kestra->context->{execution}{id};));
     is($out, "caf\x{c3}\x{a9} e1", 'cached, unchanged by the caller, and decoded as UTF-8');
 };
 

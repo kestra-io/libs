@@ -25,14 +25,14 @@ my $logger;
 
 sub format {
     my ($class, $map) = @_;
-    return '::' . $JSON->encode($map) . '::';
+    return '::' . $JSON->encode(_prepare($map, 0)) . '::';
 }
 
 sub outputs {
     my ($class, $outputs) = @_;
     croak "Outputs must be a non-empty hash reference, for example Kestra->outputs({ rows => 42 })."
         unless ref $outputs eq 'HASH' && %$outputs;
-    _send({ outputs => _prepare($outputs) });
+    _send({ outputs => $outputs });
     return;
 }
 
@@ -40,7 +40,7 @@ sub assets {
     my ($class, $assets) = @_;
     croak "Assets must be a non-empty hash reference, for example Kestra->assets({ outputs => [{ id => 'sales.orders', type => 'TABLE' }] })."
         unless ref $assets eq 'HASH' && %$assets;
-    _send({ assets => _prepare($assets) });
+    _send({ assets => $assets });
     return;
 }
 
@@ -54,9 +54,9 @@ sub timer {
         _send_metric($name, 'timer', $seconds_or_code, $tags);
         return;
     }
-    my $start = Time::HiRes::time();
+    my $start = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
     my @result = wantarray ? $seconds_or_code->() : scalar $seconds_or_code->();
-    _send_metric($name, 'timer', Time::HiRes::time() - $start, $tags);
+    _send_metric($name, 'timer', Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) - $start, $tags);
     return wantarray ? @result : $result[0];
 }
 
@@ -96,12 +96,9 @@ sub context {
 sub _send {
     my ($map) = @_;
     my $line = Kestra->format($map);
-    # JSON::PP writes NaN and Inf as bare words that are not JSON, so check the line reads back.
-    eval { $JSON->decode(substr($line, 2, -2)); 1 }
-        or croak 'This value cannot be sent to Kestra as JSON. Replace NaN and Inf with undef.';
     # One print per line, flushed, so Kestra gets each line when it is written and not at exit.
-    # $\ and $, would add text to the line.
-    local ($\, $,);
+    # $\ would add text to the line.
+    local $\;
     print STDOUT "$line\n";
     STDOUT->flush;
 }
@@ -115,12 +112,15 @@ sub _send_metric {
     my %string_tags;
     for my $key (keys %$tags) {
         my $tag = $tags->{$key};
-        croak "Metric '$name' tag '$key' must be a single value, for example { env => 'prod' }."
-            if !defined $tag || ref $tag;
+        if (_is_boolean($tag)) {
+            $tag = $$tag ? 'true' : 'false';
+        } elsif (!defined $tag || ref $tag) {
+            croak "Metric '$name' tag '$key' must be a single value, for example { env => 'prod' }.";
+        }
         # Kestra reads tags as a map of strings.
-        $string_tags{$key} = _text("$tag", 1);
+        $string_tags{$key} = "$tag";
     }
-    _send({ metrics => [{ name => _text($name, 1), type => $type, value => 0 + $value, tags => \%string_tags }] });
+    _send({ metrics => [{ name => "$name", type => $type, value => 0 + $value, tags => \%string_tags }] });
 }
 
 sub _is_finite_number {
@@ -131,32 +131,48 @@ sub _is_finite_number {
     return $number == $number && $number - $number == 0;
 }
 
-# Copies the value with every string as text, so UTF-8 bytes are not sent as Latin-1. Invalid UTF-8 dies.
-sub _prepare {
+sub _is_boolean {
     my ($value) = @_;
-    my $type = reftype $value;
-    if (!defined $value || (blessed $value && $value->isa('JSON::PP::Boolean'))) {
-        return $value;
-    } elsif (!ref $value) {
-        # Numbers are returned untouched: a regex match on one would make JSON::PP send it as a string.
-        my $flags = B::svref_2object(\$value)->FLAGS;
-        return $value if $flags & (B::SVp_IOK() | B::SVp_NOK()) && !($flags & B::SVp_POK());
-        return _text($value, 0);
-    } elsif (blessed $value || !defined $type || ($type ne 'HASH' && $type ne 'ARRAY' && $type ne 'SCALAR')) {
-        croak 'This value cannot be sent to Kestra as JSON: ' . ref($value) . ' is not a hash, array, string, number or boolean.';
-    } elsif ($type eq 'HASH') {
-        return { map { _text($_, 0) => _prepare($value->{$_}) } keys %$value };
-    } elsif ($type eq 'ARRAY') {
-        return [ map { _prepare($_) } @$value ];
-    }
-    # \1 and \0 are JSON::PP booleans.
-    return $value;
+    return blessed $value ? $value->isa('JSON::PP::Boolean') : ref $value eq 'SCALAR' && defined $$value && ($$value eq '0' || $$value eq '1');
 }
 
-# Byte strings usually hold UTF-8, so read them as UTF-8. Invalid bytes become U+FFFD when $is_lenient, or die.
+# Copies the value with every string as text, so UTF-8 bytes are not sent as Latin-1. Invalid UTF-8 dies.
+sub _prepare {
+    my ($value, $depth) = @_;
+    no warnings 'recursion';
+    # JSON::PP's own limit, which also stops a structure that contains itself.
+    croak 'This value cannot be sent to Kestra as JSON: it is nested more than 512 levels deep or contains itself.' if $depth > 512;
+    if (!defined $value || _is_boolean($value)) {
+        return $value;
+    } elsif (!ref $value) {
+        my $flags = B::svref_2object(\$value)->FLAGS;
+        if ($flags & (B::SVp_IOK() | B::SVp_NOK())) {
+            # JSON::PP writes NaN and Inf as bare words, which are not JSON.
+            croak 'This value cannot be sent to Kestra as JSON. Replace NaN and Inf with undef.' unless _is_finite_number($value);
+            # Older JSON::PP sends a number as a string once a regex has read it, so numbers skip _text.
+            return $value unless $flags & B::SVp_POK();
+        }
+        return _text($value, 0);
+    } elsif (!blessed $value && reftype $value eq 'HASH') {
+        return { map { _text($_, 0) => _prepare($value->{$_}, $depth + 1) } keys %$value };
+    } elsif (!blessed $value && reftype $value eq 'ARRAY') {
+        return [ map { _prepare($_, $depth + 1) } @$value ];
+    }
+    croak 'This value cannot be sent to Kestra as JSON: ' . ref($value) . ' is not a hash, array, string, number or boolean.';
+}
+
+# Byte strings usually hold UTF-8, so read them as UTF-8. Invalid bytes, surrogates and code points past U+10FFFF,
+# which JSON cannot carry, become U+FFFD when $is_lenient, or die.
 sub _text {
     my ($string, $is_lenient) = @_;
-    return $string if utf8::is_utf8($string) || $string !~ /[\x80-\xff]/;
+    if (utf8::is_utf8($string)) {
+        return $string unless $string =~ /[\x{D800}-\x{DFFF}]|[^\x{0}-\x{10FFFF}]/;
+        croak 'This value cannot be sent to Kestra as JSON: a string is not valid UTF-8. Decode it first, for example with Encode::decode.'
+            unless $is_lenient;
+        (my $text = $string) =~ s/[\x{D800}-\x{DFFF}]|[^\x{0}-\x{10FFFF}]/\x{FFFD}/g;
+        return $text;
+    }
+    return $string if $string !~ /[\x80-\xff]/;
     my $text = eval { Encode::decode('UTF-8', $string, $is_lenient ? Encode::FB_DEFAULT : Encode::FB_CROAK | Encode::LEAVE_SRC) };
     croak 'This value cannot be sent to Kestra as JSON: a string is not valid UTF-8. Decode it first, for example with Encode::decode.'
         unless defined $text;

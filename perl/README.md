@@ -1,6 +1,6 @@
 # Kestra (Perl)
 
-Send outputs, metrics, logs and assets from Perl script tasks to Kestra, and read the execution context. Each call prints one `::{...}::` line to stdout, which Kestra reads. A single module that uses only core modules, for Perl 5.26 and later.
+Send outputs, metrics, logs and assets from Perl script tasks to Kestra, and read the execution context. Each send call prints one `::{...}::` line to stdout, which Kestra reads. A single module that uses only core modules, for Perl 5.26 and later.
 
 ## Install
 
@@ -44,8 +44,10 @@ tasks:
 | `Kestra->assets({ inputs => [...], outputs => [...] })` | Input and output assets of the task |
 | `Kestra->counter($name, $value, \%tags)` | Counter metric |
 | `Kestra->gauge($name, $value, \%tags)` | Gauge metric |
-| `Kestra->timer($name, $seconds, \%tags)` or `Kestra->timer($name, sub { ... })` | Timer metric. A code reference is timed and its result returned |
+| `Kestra->timer($name, $seconds, \%tags)` or `Kestra->timer($name, sub { ... }, \%tags)` | Timer metric. A code reference is timed and its result returned |
 | `Kestra->logger->trace/debug/info/warn/error/fatal(@message)` | Log line at that level. Arguments are joined like `print` joins them, and `fatal` is sent as ERROR |
 | `Kestra->context($path)` | The execution context as a hash reference, for example `Kestra->context->{labels}`. Needs `executionContext: true` on the task. Without `$path`, falls back to the base64 `KESTRA_CONTEXT` variable. A `$path` that does not exist dies |
 
-Tags are optional and sent as strings. Byte strings are read as UTF-8, so a script without `use utf8` still sends `café`. Invalid UTF-8 in a log message becomes U+FFFD, and in outputs it dies with a plain message. A scalar is sent as a JSON number only while Perl holds it as a number: `'42'` and a number that was used as a string are sent as `"42"`, so write `0 + $value` to send a number. Booleans are `JSON::PP::true`, `JSON::PP::false`, `\1` or `\0`.
+Tags are optional and sent as strings, and boolean tags as `"true"` or `"false"`. Byte strings are read as UTF-8, so a script without `use utf8` still sends `café`. Invalid UTF-8 in a log message becomes U+FFFD, and in outputs it dies with a plain message.
+
+Outputs use `JSON::PP` rules. Whether a scalar is sent as a number or a string depends on how Perl last used it and on the Perl version: `'42'` is a string, so write `0 + $value` to send a number. Floats keep 15 significant digits. Booleans are `JSON::PP::true`, `JSON::PP::false`, `\1` or `\0`.
