@@ -1,7 +1,12 @@
+import { existsSync, readFileSync, statSync } from 'fs';
+
 import ConsoleLogger from '../logging/console-logger';
 import { KestraFunction, Logger } from '../types';
 
 const Kestra: KestraFunction = function () {} as KestraFunction;
+
+const CONTEXT_FILE = '.kestra-execution-context.json';
+let contextJson: string | undefined;
 
 /**
  * Formats a map object as a string by converting it to a JSON string
@@ -110,6 +115,57 @@ Kestra.gauge = (name: string, value: number, tags: any) => {
  */
 Kestra.logger = (): Logger => {
   return new ConsoleLogger(Kestra);
+};
+
+/**
+ * Returns the execution context, read from `path`, `KESTRA_EXECUTION_CONTEXT_FILE` or `.kestra-execution-context.json`
+ * (written when the task sets `executionContext: true`). Without `path`, falls back to the base64 `KESTRA_CONTEXT` variable.
+ * The default context is read once, and each call returns a new object the caller may change.
+ *
+ * @param path - The context file to read instead of the default lookup.
+ * @returns The execution context.
+ * @throws An error with code `ENOENT` when no context is found, and a `SyntaxError` when it is not a JSON object.
+ */
+Kestra.context = (path?: string): Record<string, any> => {
+  if (path === undefined && contextJson !== undefined) {
+    return JSON.parse(contextJson);
+  }
+
+  const file = path ?? (process.env.KESTRA_EXECUTION_CONTEXT_FILE || CONTEXT_FILE);
+  const encoded = process.env.KESTRA_CONTEXT ?? '';
+  let json: string;
+  let source: string;
+  if (existsSync(file) && statSync(file).isFile()) {
+    json = readFileSync(file, 'utf8');
+    source = file;
+  } else if (path === undefined && encoded !== '') {
+    json = Buffer.from(encoded, 'base64').toString('utf8');
+    source = 'KESTRA_CONTEXT';
+  } else if (path !== undefined) {
+    throw Object.assign(new Error(`Kestra execution context file '${file}' does not exist.`), { code: 'ENOENT' });
+  } else {
+    throw Object.assign(
+      new Error(
+        `No Kestra execution context found: '${file}' does not exist and the KESTRA_CONTEXT environment variable is not set. ` +
+          'The execution context is only available when the script runs inside a Kestra task.'
+      ),
+      { code: 'ENOENT' }
+    );
+  }
+
+  let context: unknown;
+  try {
+    context = JSON.parse(json);
+  } catch {
+    context = undefined;
+  }
+  if (context === null || typeof context !== 'object' || Array.isArray(context)) {
+    throw new SyntaxError(`The execution context in ${source} is not a JSON object.`);
+  }
+  if (path === undefined) {
+    contextJson = json;
+  }
+  return context as Record<string, any>;
 };
 
 export default Kestra;

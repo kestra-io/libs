@@ -4,7 +4,7 @@ One library per language, so script tasks can talk to Kestra without hand-writin
 
 ## Same features in every language
 
-Every library exposes all of these. A feature added to one library is added to all of them, or tracked in an issue under #41. Node.js does not read the execution context yet.
+Every library exposes all of these. A feature added to one library is added to all of them, or tracked in an issue under #41.
 
 | Feature | Line sent to Kestra |
 |---------|---------------------|

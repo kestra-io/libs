@@ -11,4 +11,5 @@ export interface KestraFunction {
   timer(name: string, duration: number | ((callback: () => void) => void), tags?: any): void;
   gauge(name: string, value: number, tags?: any): void;
   logger(): Logger;
+  context(path?: string): Record<string, any>;
 }
