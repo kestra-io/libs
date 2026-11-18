@@ -50,4 +50,4 @@ tasks:
 
 Tags are optional and sent as strings, and boolean tags as `"true"` or `"false"`. Byte strings are read as UTF-8, so a script without `use utf8` still sends `café`. Invalid UTF-8 in a log message becomes U+FFFD, and in outputs it dies with a plain message.
 
-Outputs use `JSON::PP` rules. Whether a scalar is sent as a number or a string depends on how Perl last used it and on the Perl version: `'42'` is a string, so write `0 + $value` to send a number. Floats keep 15 significant digits. Booleans are `JSON::PP::true`, `JSON::PP::false`, `\1` or `\0`.
+Outputs use `JSON::PP` rules. Whether a scalar is sent as a number or a string depends on how Perl last used it and on the Perl version: `'42'` is a string, so write `0 + $value` to send a number. Floats keep 15 significant digits. Booleans are `JSON::PP::true`, `JSON::PP::false`, `\1` or `\0`. From Perl 5.36, the result of a comparison such as `$count > 0` is sent as a boolean too. Before 5.36 it is sent as `1` or `""`.

@@ -108,6 +108,31 @@ subtest 'numbers stay numbers and booleans stay booleans' => sub {
     like($out, qr/"f":1\.5,"n":42,"r":false,"s":"42","t":true/);
 };
 
+subtest 'strings once used as numbers, dualvars and Perl booleans are sent without dying' => sub {
+    my $s = 'abc';
+    my $n = '1e400';
+    { no warnings; $s == 0; $n == 0 }
+    local $! = 2;
+    my ($line) = lines(capture(sub { Kestra->outputs({ status => $s, n => $n, err => $!, no => (3 < 1), yes => (3 > 1) }) }));
+    is($line->{outputs}{status}, 'abc');
+    is($line->{outputs}{n}, '1e400');
+    like($line->{outputs}{err}, qr/No such file/);
+    if (defined &builtin::is_bool) {
+        ok(JSON::PP::is_bool($line->{outputs}{no}) && !$line->{outputs}{no}, 'false is a JSON false');
+        ok(JSON::PP::is_bool($line->{outputs}{yes}) && $line->{outputs}{yes}, 'true is a JSON true');
+        like(capture(sub { Kestra->counter('x', 1, { no => (3 < 1), yes => (3 > 1) }) }), qr/"no":"false","yes":"true"/, 'boolean tags');
+        dies_with(sub { Kestra->timer('t', (3 > 1)) }, "Metric 't' value must be a finite number.");
+    } else {
+        is($line->{outputs}{no}, '', 'before 5.36 false is an empty string');
+    }
+};
+
+subtest 'two keys that read as the same text fail instead of losing a value' => sub {
+    my $characters = "caf\x{e9}";
+    utf8::upgrade($characters);
+    dies_with(sub { Kestra->outputs({ "caf\xc3\xa9" => 1, $characters => 2 }) }, 'two keys read as the same text once decoded as UTF-8.');
+};
+
 subtest 'metrics have number values, string tags and an object for no tags' => sub {
     my @lines = lines(capture(sub {
         Kestra->counter('rows', 3, { source => 'shop', batch => 7, ratio => 0.5 });

@@ -112,8 +112,8 @@ sub _send_metric {
     my %string_tags;
     for my $key (keys %$tags) {
         my $tag = $tags->{$key};
-        if (_is_boolean($tag)) {
-            $tag = $$tag ? 'true' : 'false';
+        if (defined(my $boolean = _boolean($tag))) {
+            $tag = $boolean ? 'true' : 'false';
         } elsif (!defined $tag || ref $tag) {
             croak "Metric '$name' tag '$key' must be a single value, for example { env => 'prod' }.";
         }
@@ -125,15 +125,26 @@ sub _send_metric {
 
 sub _is_finite_number {
     my ($value) = @_;
-    return 0 if !defined $value || ref $value || !looks_like_number($value);
+    return 0 if !defined $value || ref $value || defined _boolean($value) || !looks_like_number($value);
     # "inf" and "nan" look like numbers too.
     my $number = 0 + $value;
     return $number == $number && $number - $number == 0;
 }
 
-sub _is_boolean {
+# Perl marks the results of comparisons as booleans from 5.36 on. Before that they are plain '' and 1.
+# It is experimental and warns on each call before 5.40.
+my $is_native_boolean = defined &builtin::is_bool ? sub { no warnings; builtin::is_bool($_[0]) } : sub { 0 };
+
+# Returns JSON::PP::true or JSON::PP::false for a boolean, or undef for anything else.
+sub _boolean {
     my ($value) = @_;
-    return blessed $value ? $value->isa('JSON::PP::Boolean') : ref $value eq 'SCALAR' && defined $$value && ($$value eq '0' || $$value eq '1');
+    return undef unless defined $value;
+    if (blessed $value) {
+        return $value->isa('JSON::PP::Boolean') ? ($value ? JSON::PP::true : JSON::PP::false) : undef;
+    } elsif (ref $value eq 'SCALAR') {
+        return defined $$value && ($$value eq '0' || $$value eq '1') ? ($$value ? JSON::PP::true : JSON::PP::false) : undef;
+    }
+    return !ref $value && $is_native_boolean->($value) ? ($value ? JSON::PP::true : JSON::PP::false) : undef;
 }
 
 # Copies the value with every string as text, so UTF-8 bytes are not sent as Latin-1. Invalid UTF-8 dies.
@@ -142,19 +153,28 @@ sub _prepare {
     no warnings 'recursion';
     # JSON::PP's own limit, which also stops a structure that contains itself.
     croak 'This value cannot be sent to Kestra as JSON: it is nested more than 512 levels deep or contains itself.' if $depth > 512;
-    if (!defined $value || _is_boolean($value)) {
-        return $value;
+    return undef unless defined $value;
+    if (defined(my $boolean = _boolean($value))) {
+        return $boolean;
     } elsif (!ref $value) {
+        # A number has numeric flags and no string flag. A string compared as a number once has both, and stays a string.
         my $flags = B::svref_2object(\$value)->FLAGS;
-        if ($flags & (B::SVp_IOK() | B::SVp_NOK())) {
+        if ($flags & (B::SVp_IOK() | B::SVp_NOK()) && !($flags & B::SVp_POK())) {
             # JSON::PP writes NaN and Inf as bare words, which are not JSON.
             croak 'This value cannot be sent to Kestra as JSON. Replace NaN and Inf with undef.' unless _is_finite_number($value);
             # Older JSON::PP sends a number as a string once a regex has read it, so numbers skip _text.
-            return $value unless $flags & B::SVp_POK();
+            return $value;
         }
         return _text($value, 0);
     } elsif (!blessed $value && reftype $value eq 'HASH') {
-        return { map { _text($_, 0) => _prepare($value->{$_}, $depth + 1) } keys %$value };
+        my %copy;
+        for my $key (keys %$value) {
+            my $text = _text($key, 0);
+            # A byte string and a character string can read as the same key, and one value would be lost.
+            croak 'This value cannot be sent to Kestra as JSON: two keys read as the same text once decoded as UTF-8.' if exists $copy{$text};
+            $copy{$text} = _prepare($value->{$key}, $depth + 1);
+        }
+        return \%copy;
     } elsif (!blessed $value && reftype $value eq 'ARRAY') {
         return [ map { _prepare($_, $depth + 1) } @$value ];
     }
