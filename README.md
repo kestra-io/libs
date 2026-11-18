@@ -51,6 +51,8 @@ Libraries to interact with metrics and outputs in Kestra script tasks.
 | PowerShell | [`powershell/`](powershell/) |
 | Go | [`go/`](go/) |
 | Ruby | [`ruby/`](ruby/) |
+| PHP | [`php/`](php/) |
+| Perl | [`perl/`](perl/) |
 
 ![Kestra orchestrator](https://kestra.io/video.gif)
 

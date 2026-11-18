@@ -14,7 +14,7 @@ Every library exposes all of these. A feature added to one library is added to a
 | Assets | `{"assets": {"inputs": [...], "outputs": [...]}}` |
 | Execution context | Read, not sent. See below |
 
-Use the language's own idioms for the API (a `Logger` in Ruby, `slog` in Go, `Verb-Noun` commands in PowerShell), but keep the names recognizable across languages.
+Use the language's own idioms for the API (a `Logger` in Ruby, `slog` in Go, `Verb-Noun` commands in PowerShell, PSR-3 logger methods in PHP, Log4perl method names in Perl), but keep the names recognizable across languages.
 
 ## Execution context
 
