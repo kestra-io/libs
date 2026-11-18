@@ -305,7 +305,7 @@ local DECODE_ESCAPES = { ['"'] = '"', ['\\'] = '\\', ['/'] = '/', b = '\b', f = 
 
 local INVALID = {}
 
--- Decodes JSON. JSON null becomes nil. Returns nil for invalid JSON.
+-- Decodes JSON, with null as nil. Returns true and the value, or false and the byte where invalid JSON starts.
 local function decode(json)
   local pos = 1
   local value
@@ -409,9 +409,9 @@ local function decode(json)
     if pos <= #json then invalid() end
     return decoded
   end)
-  if ok then return result end
+  if ok then return true, result end
   if result ~= INVALID then error(result, 0) end
-  return nil
+  return false, pos
 end
 
 local function read_file(path)
@@ -432,23 +432,31 @@ local context_json
 -- (written when the task sets executionContext: true). Without a path, falls back to the base64 KESTRA_CONTEXT
 -- variable. The default context is read once, and each call returns a new table the caller may change.
 function kestra.context(path)
+  -- An empty path means the default lookup, as in the other libraries.
+  if path == '' then path = nil end
   local json, source = context_json, nil
   if path ~= nil or json == nil then
     local env_file = os.getenv('KESTRA_EXECUTION_CONTEXT_FILE') or ''
     local file = path or (env_file ~= '' and env_file or CONTEXT_FILE)
-    local encoded = os.getenv('KESTRA_CONTEXT') or ''
+    local encoded = (os.getenv('KESTRA_CONTEXT') or ''):gsub('%s', '')
     json = read_file(file)
     source = file
     if json == nil and path ~= nil then
       fail("Kestra execution context file '" .. file .. "' does not exist.")
     elseif json == nil and encoded ~= '' then
+      if #encoded % 4 ~= 0 or not encoded:find('^[%w%+/]+=?=?$') then
+        fail('The KESTRA_CONTEXT environment variable is not valid base64.')
+      end
       json, source = base64_decode(encoded), 'KESTRA_CONTEXT'
     elseif json == nil then
       fail("No Kestra execution context found: '" .. file .. "' does not exist and the KESTRA_CONTEXT environment "
         .. 'variable is not set. The execution context is only available when the script runs inside a Kestra task.')
     end
   end
-  local context = decode(json)
+  local ok, context = decode(json)
+  if not ok then
+    fail('The execution context in ' .. source .. ' is not valid JSON: it fails at byte ' .. context .. '.')
+  end
   if type(context) ~= 'table' or json:match('^%s*(.)') ~= '{' then
     fail('The execution context in ' .. source .. ' is not a JSON object.')
   end

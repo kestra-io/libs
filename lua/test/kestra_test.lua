@@ -239,6 +239,16 @@ test('an explicit path is read as given and never cached as the default context'
   os.remove(explicit)
 end)
 
+test('an empty path means the default lookup', function()
+  with_env({ KESTRA_CONTEXT = 'eyJhIjoxfQ==' }, function() eq(fresh().context('').a, 1) end)
+end)
+
+test('a context path that is a directory fails instead of falling back', function()
+  with_env({ KESTRA_EXECUTION_CONTEXT_FILE = '/', KESTRA_CONTEXT = 'eyJhIjoxfQ==' }, function()
+    eq(error_of(function() fresh().context() end), "Kestra execution context file '/' cannot be read: it is not a file.")
+  end)
+end)
+
 test('an explicit path never falls back to KESTRA_CONTEXT', function()
   with_env({ KESTRA_CONTEXT = 'eyJhIjoxfQ==' }, function()
     eq(error_of(function() fresh().context('typo.json') end), "Kestra execution context file 'typo.json' does not exist.")
@@ -246,13 +256,24 @@ test('an explicit path never falls back to KESTRA_CONTEXT', function()
 end)
 
 test('content that is not a JSON object names its source', function()
-  for _, json in ipairs({ '[1, 2]', '{oops', 'null', '{"a":1} x', '{"a":"\\x"}', '' }) do
+  for _, json in ipairs({ '[1, 2]', 'null', '42' }) do
     write_file(DEFAULT_FILE, json)
     with_env({}, function()
       eq(error_of(function() fresh().context() end), 'The execution context in .kestra-execution-context.json is not a JSON object.')
     end)
   end
   os.remove(DEFAULT_FILE)
+  for json, byte in pairs({ ['{oops'] = 2, ['{"a":1} x'] = 9, ['{"a":"\\x"}'] = 7, [''] = 1, ['{"a":'] = 6 }) do
+    write_file(DEFAULT_FILE, json)
+    with_env({}, function()
+      eq(error_of(function() fresh().context() end),
+        'The execution context in .kestra-execution-context.json is not valid JSON: it fails at byte ' .. byte .. '.')
+    end)
+  end
+  os.remove(DEFAULT_FILE)
+  with_env({ KESTRA_CONTEXT = '{"a":1}' }, function()
+    eq(error_of(function() fresh().context() end), 'The KESTRA_CONTEXT environment variable is not valid base64.')
+  end)
   with_env({ KESTRA_CONTEXT = 'W10=' }, function()
     eq(error_of(function() fresh().context() end), 'The execution context in KESTRA_CONTEXT is not a JSON object.')
   end)
