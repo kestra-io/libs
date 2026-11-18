@@ -261,6 +261,26 @@ jobs:
       - name: Test
         run: php tests/KestraTest.php
 
+  perl:
+    name: Test Perl module (${{ matrix.perl }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 5.36 is the first version with native booleans.
+        perl: ['5.26', '5.36', 'latest']
+    container: perl:${{ matrix.perl }}
+    defaults:
+      run:
+        working-directory: perl
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        run: prove -lv t
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -273,6 +293,7 @@ jobs:
       - go
       - ruby
       - php
+      - perl
     steps:
       - name: Create Release
         uses: actions/create-release@v1
