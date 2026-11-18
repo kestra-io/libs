@@ -324,7 +324,7 @@ def test_metric_validation_empty_or_non_string_name():
 
 
 def test_metric_validation_non_finite_value():
-    """Test metric rejects NaN, Inf, and non-numeric values."""
+    """Test metric rejects NaN, Inf, non-numeric values, and huge overflow ints."""
     with pytest.raises(ValueError, match="value must be a finite number"):
         Kestra.counter("count", float("nan"))
 
@@ -339,6 +339,9 @@ def test_metric_validation_non_finite_value():
 
     with pytest.raises(ValueError, match="value must be a finite number"):
         Kestra.counter("count", "123")
+
+    with pytest.raises(ValueError, match="value must be a finite number"):
+        Kestra.counter("count", 10**400)
 
 
 def test_metric_tags_validation(monkeypatch):
@@ -377,13 +380,35 @@ def test_outputs_valid(monkeypatch):
     assert calls == [{"outputs": {"status": 200, "message": "done"}}]
 
 
-def test_outputs_empty_or_invalid():
-    """Test outputs validation."""
-    with pytest.raises(ValueError, match="Outputs must be a non-empty dictionary"):
-        Kestra.outputs({})
+def test_outputs_empty_is_noop(monkeypatch):
+    """Test that outputs with empty mapping is a no-op (backward compatible)."""
+    calls = []
 
-    with pytest.raises(ValueError, match="Outputs must be a non-empty dictionary"):
+    def mock_send(data):
+        calls.append(data)
+
+    monkeypatch.setattr(Kestra, "_send", mock_send)
+
+    Kestra.outputs({})
+    assert calls == []
+
+
+def test_outputs_invalid():
+    """Test outputs validation rejects non-mapping inputs."""
+    with pytest.raises(ValueError, match="Outputs must be a dictionary"):
         Kestra.outputs("invalid")
+
+    with pytest.raises(ValueError, match="Outputs must be a dictionary"):
+        Kestra.outputs([1, 2, 3])
+
+
+def test_outputs_non_finite_rejected():
+    """Test that non-finite floats in outputs are rejected with ValueError."""
+    with pytest.raises(ValueError, match="cannot be sent to Kestra as JSON"):
+        Kestra.outputs({"nan_val": float("nan")})
+
+    with pytest.raises(ValueError, match="cannot be sent to Kestra as JSON"):
+        Kestra.outputs({"inf_val": float("inf")})
 
 
 def test_send_flushes_stdout(monkeypatch):

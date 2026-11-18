@@ -47,12 +47,22 @@ class Kestra:
 
     Example - Send an asset:
         Kestra.assets({
-            "id": "my_asset",
-            "type": "TABLE",
-            "name": "MY_TABLE",
-            "metadata": {
-                "owner": "team-a"
-            }
+            "inputs": [
+                {
+                    "id": "my_input_asset",
+                    "type": "TABLE",
+                }
+            ],
+            "outputs": [
+                {
+                    "id": "my_asset",
+                    "type": "TABLE",
+                    "name": "MY_TABLE",
+                    "metadata": {
+                        "owner": "team-a"
+                    }
+                }
+            ]
         })
 
     Example - Log an error:
@@ -86,7 +96,13 @@ class Kestra:
         Returns:
             str: The Kestra-formatted message.
         """
-        return "::" + json.dumps(map_) + "::"
+        try:
+            return "::" + json.dumps(map_, allow_nan=False) + "::"
+        except ValueError as e:
+            raise ValueError(
+                "This value cannot be sent to Kestra as JSON: "
+                "replace NaN and Infinity with None."
+            ) from e
 
     @staticmethod
     def _metrics(
@@ -107,11 +123,16 @@ class Kestra:
         if not isinstance(name, str) or not name:
             raise ValueError("Metric name must be a non-empty string.")
 
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-        ):
+        try:
+            is_finite = (
+                not isinstance(value, bool)
+                and isinstance(value, (int, float))
+                and math.isfinite(value)
+            )
+        except OverflowError:
+            is_finite = False
+
+        if not is_finite:
             raise ValueError(f"Metric '{name}' value must be a finite number.")
 
         string_tags = {}
@@ -153,11 +174,13 @@ class Kestra:
         Args:
             map_ (Mapping): The outputs to send to the Kestra server.
         """
-        if not isinstance(map_, Mapping) or len(map_) == 0:
+        if not isinstance(map_, Mapping):
             raise ValueError(
-                "Outputs must be a non-empty dictionary, "
+                "Outputs must be a dictionary, "
                 "for example Kestra.outputs({'rows': 42})."
             )
+        if not map_:
+            return
         Kestra._send({"outputs": dict(map_)})
 
     @staticmethod
@@ -169,11 +192,13 @@ class Kestra:
         Args:
             map_ (Mapping): The full asset properties to send to the Kestra server.
         """
-        if not isinstance(map_, Mapping) or len(map_) == 0:
+        if not isinstance(map_, Mapping):
             raise ValueError(
-                "Assets must be a non-empty dictionary, for example "
+                "Assets must be a dictionary, for example "
                 "Kestra.assets({'outputs': [{'id': 'sales.orders', 'type': 'TABLE'}]})."
             )
+        if not map_:
+            return
         Kestra._send({"assets": dict(map_)})
 
     @staticmethod

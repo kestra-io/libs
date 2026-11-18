@@ -14,12 +14,14 @@ The `Kestra` class is responsible for sending metrics, outputs, and logs to the 
 
 ### Methods
 
-- **\_send(map\_: dict)**: Sends a message to the Kestra server.
-- **format(map\_: dict) -> str**: Formats a message to be sent to the Kestra server.
-- **\_metrics(name: str, type\_: str, value: int, tags: dict | None = None)**: Sends a metric to the Kestra server.
-- **outputs(map\_: dict)**: Sends outputs to the Kestra server.
-- **counter(name: str, value: int, tags: dict | None = None)**: Sends a counter to the Kestra server.
-- **timer(name: str, duration: int | Callable, tags: dict | None = None)**: Sends a timer to the Kestra server.
+- **\_send(map\_: dict)**: Sends a message to the Kestra server (flushes stdout immediately).
+- **format(map\_: dict) -> str**: Formats a message to be sent to the Kestra server (`::{"...": ...}::`).
+- **\_metrics(name: str, type\_: str, value: int | float, tags: Mapping | None = None)**: Sends a metric to the Kestra server. Validates that `name` is a non-empty string, `value` is a finite number (rejecting `NaN`, `Inf`, and booleans with `ValueError`), and `tags` are single stringifiable values.
+- **outputs(map\_: Mapping)**: Sends key-value outputs to the Kestra server. Requires a dictionary (empty mapping is a no-op).
+- **assets(map\_: Mapping)**: Sends assets to the Kestra server. Requires a dictionary (empty mapping is a no-op).
+- **counter(name: str, value: int | float, tags: Mapping | None = None)**: Sends a counter to the Kestra server.
+- **timer(name: str, duration: int | float | Callable, tags: Mapping | None = None)**: Sends a timer in seconds to the Kestra server. If `duration` is a callable, it measures the elapsed time in seconds, records the metric, and returns the callable's return value.
+- **gauge(name: str, value: int | float, tags: Mapping | None = None)**: Sends a gauge to the Kestra server.
 - **logger() -> Logger**: Retrieves the logger for the Kestra server.
 
 ## Flow Class
@@ -157,10 +159,14 @@ Kestra.counter("my_counter", 1)
 
 ### Timers
 
-The `Kestra` class provides a method to send timer metrics to the Kestra server.
+The `Kestra` class provides a method to send timer metrics in seconds to the Kestra server. You can pass a duration in seconds, or pass a callable: `timer()` will measure the execution time in seconds, record the timer metric, and return the callable's return value.
 
 ```python
-Kestra.timer("my_timer", 1)
+# Pass duration directly in seconds
+Kestra.timer("my_timer", 1.5)
+
+# Time a callable function and receive its result
+result = Kestra.timer("compute_duration", lambda: sum(range(1000)))
 ```
 
 ### Gauges
