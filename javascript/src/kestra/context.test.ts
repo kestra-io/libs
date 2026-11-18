@@ -109,9 +109,27 @@ describe('Context', () => {
     expect(error.message).toBe("Kestra execution context file 'typo.json' does not exist.");
   });
 
+  test('an empty or null path means the default lookup, with the KESTRA_CONTEXT fallback', async () => {
+    process.chdir(emptyDir());
+    process.env.KESTRA_CONTEXT = Buffer.from('{"execution":{"id":"from-env"}}').toString('base64');
+    const Kestra = await kestra();
+
+    expect([Kestra.context(''), Kestra.context(null)].map((context) => context.execution.id)).toEqual([
+      'from-env',
+      'from-env',
+    ]);
+  });
+
+  test('a context path that is a directory fails instead of falling back', async () => {
+    process.env.KESTRA_EXECUTION_CONTEXT_FILE = emptyDir();
+    process.env.KESTRA_CONTEXT = Buffer.from('{"a":1}').toString('base64');
+    const Kestra = await kestra();
+
+    expect(errorOf(() => Kestra.context()).code).toBe('EISDIR');
+  });
+
   test.each([
     ['a JSON array', '[1, 2]'],
-    ['invalid JSON', '{oops'],
     ['null', 'null'],
   ])('a file holding %s names the file', async (_, json) => {
     process.chdir(contextDir(json));
@@ -119,6 +137,25 @@ describe('Context', () => {
 
     expect(() => Kestra.context()).toThrow(
       new SyntaxError('The execution context in .kestra-execution-context.json is not a JSON object.')
+    );
+  });
+
+  test('invalid JSON names the file and the parse error', async () => {
+    process.chdir(contextDir('{"a":'));
+    const Kestra = await kestra();
+    const error = errorOf(() => Kestra.context());
+
+    expect(error).toBeInstanceOf(SyntaxError);
+    expect(error.message).toMatch(/^The execution context in \.kestra-execution-context\.json is not valid JSON: ./);
+  });
+
+  test('a KESTRA_CONTEXT that is not base64 says so', async () => {
+    process.chdir(emptyDir());
+    process.env.KESTRA_CONTEXT = '{"a":1}';
+    const Kestra = await kestra();
+
+    expect(() => Kestra.context()).toThrow(
+      new SyntaxError('The KESTRA_CONTEXT environment variable is not valid base64.')
     );
   });
 

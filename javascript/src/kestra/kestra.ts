@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
 
 import ConsoleLogger from '../logging/console-logger';
 import { KestraFunction, Logger } from '../types';
@@ -122,47 +122,61 @@ Kestra.logger = (): Logger => {
  * (written when the task sets `executionContext: true`). Without `path`, falls back to the base64 `KESTRA_CONTEXT` variable.
  * The default context is read once, and each call returns a new object the caller may change.
  *
- * @param path - The context file to read instead of the default lookup.
+ * @param path - The context file to read instead of the default lookup. An empty path means the default lookup.
  * @returns The execution context.
- * @throws An error with code `ENOENT` when no context is found, and a `SyntaxError` when it is not a JSON object.
+ * @throws An error with code `ENOENT` when no context is found, the read error when the file cannot be read, and a
+ *   `SyntaxError` when `KESTRA_CONTEXT` is not base64 or the context is not a JSON object.
  */
-Kestra.context = (path?: string): Record<string, any> => {
-  if (path === undefined && contextJson !== undefined) {
+Kestra.context = (path?: string | null): Record<string, any> => {
+  // An empty path means the default lookup, as in the other libraries.
+  const isExplicit = Boolean(path);
+  if (!isExplicit && contextJson !== undefined) {
     return JSON.parse(contextJson);
   }
 
-  const file = path ?? (process.env.KESTRA_EXECUTION_CONTEXT_FILE || CONTEXT_FILE);
-  const encoded = process.env.KESTRA_CONTEXT ?? '';
+  const file = path || process.env.KESTRA_EXECUTION_CONTEXT_FILE || CONTEXT_FILE;
+  const encoded = (process.env.KESTRA_CONTEXT ?? '').replace(/\s/g, '');
   let json: string;
-  let source: string;
-  if (existsSync(file) && statSync(file).isFile()) {
+  let source = file;
+  try {
     json = readFileSync(file, 'utf8');
-    source = file;
-  } else if (path === undefined && encoded !== '') {
+  } catch (error) {
+    // Only a missing file falls back. A directory or an unreadable file is a misconfiguration to report.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+    if (isExplicit) {
+      throw Object.assign(new Error(`Kestra execution context file '${file}' does not exist.`), { code: 'ENOENT' });
+    }
+    if (encoded === '') {
+      throw Object.assign(
+        new Error(
+          `No Kestra execution context found: '${file}' does not exist and the KESTRA_CONTEXT environment variable is not set. ` +
+            'The execution context is only available when the script runs inside a Kestra task.'
+        ),
+        { code: 'ENOENT' }
+      );
+    }
+    // Buffer skips characters that are not base64 instead of failing.
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+      throw new SyntaxError('The KESTRA_CONTEXT environment variable is not valid base64.');
+    }
     json = Buffer.from(encoded, 'base64').toString('utf8');
     source = 'KESTRA_CONTEXT';
-  } else if (path !== undefined) {
-    throw Object.assign(new Error(`Kestra execution context file '${file}' does not exist.`), { code: 'ENOENT' });
-  } else {
-    throw Object.assign(
-      new Error(
-        `No Kestra execution context found: '${file}' does not exist and the KESTRA_CONTEXT environment variable is not set. ` +
-          'The execution context is only available when the script runs inside a Kestra task.'
-      ),
-      { code: 'ENOENT' }
-    );
   }
 
   let context: unknown;
   try {
     context = JSON.parse(json);
-  } catch {
-    context = undefined;
+  } catch (error) {
+    throw new SyntaxError(`The execution context in ${source} is not valid JSON: ${(error as Error).message}`, {
+      cause: error,
+    });
   }
   if (context === null || typeof context !== 'object' || Array.isArray(context)) {
     throw new SyntaxError(`The execution context in ${source} is not a JSON object.`);
   }
-  if (path === undefined) {
+  if (!isExplicit) {
     contextJson = json;
   }
   return context as Record<string, any>;
