@@ -83,7 +83,8 @@ end
 -- 'array' for the keys 1 to n or a table made with kestra.array, else 'object'.
 local function table_kind(t)
   local count, max, is_sequence = 0, 0, true
-  for key in pairs(t) do
+  -- next, not pairs, so a __pairs metamethod cannot list keys the table does not hold.
+  for key in next, t do
     count = count + 1
     if type(key) == 'number' and key >= 1 and is_integer(key) then
       max = math.max(max, key)
@@ -107,14 +108,14 @@ local encode
 
 local function object_json(t, depth)
   local keys, by_text = {}, {}
-  for key in pairs(t) do
+  for key in next, t do
     local text
     if type(key) == 'string' then
       text = key
     elseif is_finite_number(key) then
       text = number_text(key)
     else
-      fail('This value cannot be sent to Kestra as JSON: a table key must be a string or a number, not a ' .. type(key) .. '.')
+      fail('This value cannot be sent to Kestra as JSON: a table key must be a string or a finite number.')
     end
     if by_text[text] ~= nil then
       fail("This value cannot be sent to Kestra as JSON: the keys " .. text .. " and '" .. text .. "' are both in one table.")
@@ -259,6 +260,11 @@ for method, level in pairs(LEVELS) do
     local first = args[1] == logger and 2 or 1
     local message = args[first]
     if args.n > first then
+      -- Lua 5.1 formats only strings and numbers with %s.
+      for i = first + 1, args.n do
+        local kind = type(args[i])
+        if kind ~= 'string' and kind ~= 'number' then args[i] = tostring(args[i]) end
+      end
       message = string.format(tostring(message), unpack(args, first + 1, args.n))
     end
     -- Invalid UTF-8 becomes U+FFFD, so a log call never fails on its text.
@@ -314,7 +320,7 @@ local function decode(json)
     local parts = {}
     pos = pos + 1
     while true do
-      local from, to = json:find('^[^"\\%c]+', pos)
+      local from, to = json:find('^[^"\\\1-\31]+', pos)
       if from then
         parts[#parts + 1] = json:sub(from, to)
         pos = to + 1

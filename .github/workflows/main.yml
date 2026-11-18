@@ -290,7 +290,7 @@ jobs:
       fail-fast: false
       matrix:
         # 5.3 is the first version with integers.
-        image: ['nickblah/lua:5.1', 'nickblah/lua:5.3', 'nickblah/lua:latest', 'nickblah/luajit:latest']
+        image: ['nickblah/lua:5.1', 'nickblah/lua:5.3', 'nickblah/lua:5.4', 'nickblah/lua:latest', 'nickblah/luajit:latest']
     container: ${{ matrix.image }}
     defaults:
       run:

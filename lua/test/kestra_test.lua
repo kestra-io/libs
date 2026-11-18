@@ -78,6 +78,8 @@ end)
 
 test('an empty table is an object, and kestra.array makes a list', function()
   eq(kestra.format({ a = {}, b = kestra.array(), c = kestra.array({ 'x' }) }), '::{"a":{},"b":[],"c":["x"]}::')
+  local listed = setmetatable({ a = 1 }, { __pairs = function() return next, { z = 9 }, nil end })
+  eq(kestra.format({ t = listed }), '::{"t":{"a":1}}::')
 end)
 
 for _, case in ipairs({
@@ -88,7 +90,7 @@ for _, case in ipairs({
   { 'a surrogate', { v = '\237\160\128' }, 'a string is not valid UTF-8' },
   { 'an overlong form', { v = '\192\175' }, 'a string is not valid UTF-8' },
   { 'colliding keys', { v = { [1] = 'a', ['1'] = 'b' } }, "the keys 1 and '1'" },
-  { 'a boolean key', { v = { [true] = 1 } }, 'a table key must be a string or a number, not a boolean' },
+  { 'a boolean key', { v = { [true] = 1 } }, 'a table key must be a string or a finite number' },
   { 'kestra.array with a name', { v = kestra.array({ x = 1 }) }, 'must hold only the keys 1 to n' },
 }) do
   test('outputs refuse ' .. case[1], function()
@@ -156,14 +158,14 @@ end)
 test('logger levels, format values and both call styles', function()
   local lines = capture(function()
     kestra.logger:trace('t')
-    kestra.logger:debug('%d rows', 3)
+    kestra.logger:debug('%d rows, %s %s %s', 3, nil, true, 'x')
     kestra.logger.info('dot call')
     kestra.logger:warn('100%')
     kestra.logger:error(nil)
     kestra.logger:fatal('caf\233 \226\128\168')
   end)
   eq(lines, '::{"logs":[{"level":"TRACE","message":"t"}]}::\n'
-    .. '::{"logs":[{"level":"DEBUG","message":"3 rows"}]}::\n'
+    .. '::{"logs":[{"level":"DEBUG","message":"3 rows, nil true x"}]}::\n'
     .. '::{"logs":[{"level":"INFO","message":"dot call"}]}::\n'
     .. '::{"logs":[{"level":"WARN","message":"100%"}]}::\n'
     .. '::{"logs":[{"level":"ERROR","message":"nil"}]}::\n'
@@ -177,7 +179,7 @@ test('assets send empty inputs and outputs as lists and empty metadata as {}', f
   eq(line, '::{"assets":{"inputs":[],"outputs":[{"id":"sales.orders","metadata":{},"type":"TABLE"}]}}::\n')
 end)
 
-local CONTEXT = '{"labels":{"team":"caf\\u00e9","emoji":"\\ud83d\\ude00"},"inputs":{"text":"a\\nb \\"q\\"","list":[1,null,2.5,true]},'
+local CONTEXT = '{"labels":{"team":"caf\\u00e9","raw":"x\127y","emoji":"\\ud83d\\ude00"},"inputs":{"text":"a\\nb \\"q\\"","list":[1,null,2.5,true]},'
   .. '"vars":{"n":-42,"e":1.5e3,"empty":{},"none":null}}'
 local DIR = os.tmpname()
 os.remove(DIR)
@@ -191,6 +193,7 @@ test('context is read from the default file once, and each call returns a new ta
   os.remove(DEFAULT_FILE)
   eq(context.labels.team, 'caf\195\169')
   eq(context.labels.emoji, '\240\159\152\128')
+  eq(context.labels.raw, 'x\127y')
   eq(context.inputs.text, 'a\nb "q"')
   eq(context.inputs.list[2], nil)
   eq(context.inputs.list[3], 2.5)
