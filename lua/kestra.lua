@@ -161,11 +161,11 @@ local function send_line(line)
   io.stdout:flush()
 end
 
-local function is_map(value)
-  return type(value) == 'table' and next(value) ~= nil and table_kind(value) == 'object'
+-- An empty table sends nothing, as in Python, so outputs built in a loop over no rows do not fail the task.
+local function is_empty_or_map(value)
+  return type(value) == 'table' and (next(value) == nil or table_kind(value) == 'object')
 end
 
--- Returns the `::{...}::` line for a table, without sending it.
 function kestra.format(map)
   if type(map) ~= 'table' or table_kind(map) ~= 'object' then
     fail('Kestra lines hold a table with string keys, for example { outputs = { rows = 42 } }.')
@@ -179,21 +179,28 @@ function kestra.array(t)
 end
 
 function kestra.outputs(outputs)
-  if not is_map(outputs) then
-    fail('Outputs must be a non-empty table with string keys, for example kestra.outputs({ rows = 42 }).')
+  if not is_empty_or_map(outputs) then
+    fail('Outputs must be a table with string keys, for example kestra.outputs({ rows = 42 }).')
   end
+  if next(outputs) == nil then return end
   send_line(kestra.format({ outputs = outputs }))
 end
 
 function kestra.assets(assets)
-  if not is_map(assets) then
-    fail("Assets must be a non-empty table, for example kestra.assets({ outputs = { { id = 'sales.orders', type = 'TABLE' } } }).")
+  if not is_empty_or_map(assets) then
+    fail("Assets must be a table, for example kestra.assets({ outputs = { { id = 'sales.orders', type = 'TABLE' } } }).")
   end
+  if next(assets) == nil then return end
   local copy = {}
-  for key, value in pairs(assets) do
+  for key, value in next, assets do
+    if key ~= 'inputs' and key ~= 'outputs' then
+      fail("Assets hold only inputs and outputs, not '" .. tostring(key) .. "'.")
+    end
     -- Kestra reads inputs and outputs as lists, and an empty table would be sent as {}.
-    if (key == 'inputs' or key == 'outputs') and type(value) == 'table' and next(value) == nil then
+    if type(value) == 'table' and next(value) == nil then
       value = kestra.array()
+    elseif type(value) ~= 'table' or table_kind(value) ~= 'array' then
+      fail('Asset ' .. key .. " must be a list, for example { { id = 'sales.orders', type = 'TABLE' } }.")
     end
     copy[key] = value
   end
@@ -207,7 +214,7 @@ local function send_metric(name, metric_type, value, tags)
     fail("Metric '" .. name .. "' tags must be a table, for example { env = 'prod' }.")
   end
   local string_tags = {}
-  for key, tag in pairs(tags or {}) do
+  for key, tag in next, tags or {} do
     if type(key) ~= 'string' then
       fail("Metric '" .. name .. "' tags must be a table of names to values, for example { env = 'prod' }.")
     end
@@ -252,29 +259,36 @@ end
 -- LuaLogging method names, mapped to Kestra levels.
 local LEVELS = { trace = 'TRACE', debug = 'DEBUG', info = 'INFO', warn = 'WARN', error = 'ERROR', fatal = 'ERROR' }
 
+-- tostring can raise, or return a non-string on Lua 5.1, from a __tostring metamethod.
+local function safe_tostring(value)
+  local ok, text = pcall(tostring, value)
+  if ok and type(text) == 'string' then return text end
+  return '<' .. type(value) .. '>'
+end
+
 local logger = {}
 for method, level in pairs(LEVELS) do
   -- Takes a message, or a string.format pattern and its values. Works called with : or with .
   logger[method] = function(...)
     local args = pack(...)
     local first = args[1] == logger and 2 or 1
-    local message = args[first]
+    local message = safe_tostring(args[first])
     if args.n > first then
       -- Lua 5.1 formats only strings and numbers with %s.
       for i = first + 1, args.n do
         local kind = type(args[i])
-        if kind ~= 'string' and kind ~= 'number' then args[i] = tostring(args[i]) end
+        if kind ~= 'string' and kind ~= 'number' then args[i] = safe_tostring(args[i]) end
       end
-      local ok, formatted = pcall(string.format, tostring(message), unpack(args, first + 1, args.n))
+      local ok, formatted = pcall(string.format, message, unpack(args, first + 1, args.n))
       -- A pattern that does not match its values is logged as is, with the values after it, so a log call never fails.
       if not ok then
-        for i = first + 1, args.n do args[i] = tostring(args[i]) end
-        formatted = tostring(message) .. ' ' .. table.concat(args, ' ', first + 1, args.n)
+        for i = first + 1, args.n do args[i] = safe_tostring(args[i]) end
+        formatted = message .. ' ' .. table.concat(args, ' ', first + 1, args.n)
       end
       message = formatted
     end
     -- Invalid UTF-8 becomes U+FFFD.
-    local text = string_json(tostring(message), true)
+    local text = string_json(message, true)
     send_line('::{"logs":[{"level":"' .. level .. '","message":' .. text .. '}]}::')
   end
 end

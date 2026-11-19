@@ -106,11 +106,12 @@ test('a table that contains itself fails clearly', function()
   assert(err:find('contains itself', 1, true), err)
 end)
 
-test('outputs need a non-empty table with string keys', function()
-  for _, value in ipairs({ {}, { 1, 2 }, 'rows' }) do
+test('outputs need a table with string keys, and an empty one sends nothing', function()
+  for _, value in ipairs({ { 1, 2 }, 'rows' }) do
     eq(error_of(function() kestra.outputs(value) end),
-      'Outputs must be a non-empty table with string keys, for example kestra.outputs({ rows = 42 }).')
+      'Outputs must be a table with string keys, for example kestra.outputs({ rows = 42 }).')
   end
+  eq(capture(function() kestra.outputs({}) kestra.assets({}) end), '')
 end)
 
 test('metrics send numbers and string tags, and empty tags as {}', function()
@@ -179,6 +180,27 @@ test('assets send empty inputs and outputs as lists and empty metadata as {}', f
     kestra.assets({ inputs = {}, outputs = { { id = 'sales.orders', type = 'TABLE', metadata = {} } } })
   end)
   eq(line, '::{"assets":{"inputs":[],"outputs":[{"id":"sales.orders","metadata":{},"type":"TABLE"}]}}::\n')
+end)
+
+test('assets need inputs and outputs as lists, and no other keys', function()
+  eq(error_of(function() kestra.assets({ outputs = { id = 'a', type = 'TABLE' } }) end),
+    "Asset outputs must be a list, for example { { id = 'sales.orders', type = 'TABLE' } }.")
+  eq(error_of(function() kestra.assets({ foo = 1 }) end), "Assets hold only inputs and outputs, not 'foo'.")
+end)
+
+test('a log call never fails on a __tostring that raises or returns a non-string', function()
+  local raises = setmetatable({}, { __tostring = function() error('boom') end })
+  local number = setmetatable({}, { __tostring = function() return 1 end })
+  -- Lua 5.4 turns the returned number into text, older versions do not.
+  local ok, text = pcall(tostring, number)
+  local number_message = ok and type(text) == 'string' and text or '<table>'
+  eq(capture(function()
+    kestra.logger:info(raises)
+    kestra.logger:info('%s and %s', raises, 'x')
+    kestra.logger:info(number)
+  end), '::{"logs":[{"level":"INFO","message":"<table>"}]}::\n'
+    .. '::{"logs":[{"level":"INFO","message":"<table> and x"}]}::\n'
+    .. '::{"logs":[{"level":"INFO","message":"' .. number_message .. '"}]}::\n')
 end)
 
 local CONTEXT = '{"labels":{"team":"caf\\u00e9","raw":"x\127y","emoji":"\\ud83d\\ude00"},"inputs":{"text":"a\\nb \\"q\\"","list":[1,null,2.5,true]},'
