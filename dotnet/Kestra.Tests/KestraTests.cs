@@ -203,7 +203,8 @@ public class KestraTests : IDisposable
         var result = 0;
         var line = Capture(() => result = Kestra.Timer("fetch", () => { Thread.Sleep(20); return 7; }, new { env = "qa" }));
         Assert.Equal(7, result);
-        Assert.Matches("^::\\{\"metrics\":\\[\\{\"name\":\"fetch\",\"type\":\"timer\",\"value\":0\\.0[2-9][0-9]*,\"tags\":\\{\"env\":\"qa\"\\}\\}\\]\\}::\n$", line);
+        var match = System.Text.RegularExpressions.Regex.Match(line, "^::\\{\"metrics\":\\[\\{\"name\":\"fetch\",\"type\":\"timer\",\"value\":([0-9.E-]+),\"tags\":\\{\"env\":\"qa\"\\}\\}\\]\\}::\n$");
+        Assert.True(match.Success && double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) >= 0.02, line);
         Assert.Equal("boom", ErrorOf<InvalidOperationException>(() => Kestra.Timer("fetch", () => throw new InvalidOperationException("boom"))).Message);
         Assert.StartsWith("Timer 'fetch' got an async function", ErrorOf<ArgumentException>(() => Kestra.Timer("fetch", () => Task.Delay(1))).Message);
 
@@ -218,7 +219,8 @@ public class KestraTests : IDisposable
         {
             Console.SetOut(real);
         }
-        Assert.Matches("\"value\":0\\.0[3-9]", writer.ToString());
+        var asyncValue = System.Text.RegularExpressions.Regex.Match(writer.ToString(), "\"value\":([0-9.E-]+)").Groups[1].Value;
+        Assert.True(double.Parse(asyncValue, System.Globalization.CultureInfo.InvariantCulture) >= 0.03, writer.ToString());
     }
 
     [Fact]

@@ -29,7 +29,7 @@ public static class Kestra
         MaxDepth = MaxDepth,
         // Fields too, or a class or struct with public fields would be sent as {}.
         IncludeFields = true,
-        // Without compiler backing fields, such as the name@ fields F# 8 makes public in anonymous records.
+        // Without compiler-generated fields, such as the name@ backing fields F# 8 makes public in anonymous records.
         TypeInfoResolver = new DefaultJsonTypeInfoResolver
         {
             Modifiers =
@@ -39,7 +39,7 @@ public static class Kestra
                     for (var i = info.Properties.Count - 1; i >= 0; i--)
                     {
                         if (info.Properties[i].AttributeProvider is System.Reflection.FieldInfo field
-                            && (field.Name.Contains('@') || field.IsDefined(typeof(CompilerGeneratedAttribute), false)))
+                            && field.IsDefined(typeof(CompilerGeneratedAttribute), false))
                         {
                             info.Properties.RemoveAt(i);
                         }
@@ -54,7 +54,6 @@ public static class Kestra
         },
     };
 
-    private static readonly JsonNodeOptions NodeOptions = new();
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static string? contextJson;
 
@@ -171,7 +170,7 @@ public static class Kestra
     {
         var isExplicit = !string.IsNullOrEmpty(path);
         var json = isExplicit ? null : Volatile.Read(ref contextJson);
-        var source = "the cached context";
+        var source = "";
         if (json is null)
         {
             var file = isExplicit ? path! : NonEmpty(Environment.GetEnvironmentVariable("KESTRA_EXECUTION_CONTEXT_FILE")) ?? ContextFile;
@@ -224,7 +223,7 @@ public static class Kestra
         JsonNode? node;
         try
         {
-            node = JsonNode.Parse(json, NodeOptions, new JsonDocumentOptions { MaxDepth = MaxDepth });
+            node = JsonNode.Parse(json, null, new JsonDocumentOptions { MaxDepth = MaxDepth });
             // JsonObject finds duplicate keys only when read, so read them all now instead of failing later on a key.
             Validate(node);
         }
@@ -281,7 +280,7 @@ public static class Kestra
             // so read them all now and fail instead of sending one value twice.
             Validate(node);
         }
-        catch (ArgumentException e) when (e is not ArgumentNullException)
+        catch (ArgumentException e)
         {
             throw new ArgumentException("This value cannot be sent to Kestra as JSON: two keys read as the same text, such as 1 and \"1\".", e);
         }
@@ -367,8 +366,7 @@ public static class Kestra
 
     private sealed class TupleConverter<T> : JsonConverter<T> where T : ITuple
     {
-        public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-            throw new NotSupportedException("Tuples are only written.");
+        public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
 
         public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
         {
@@ -388,7 +386,7 @@ public static class Kestra
     // Throws a type of its own for NaN and Infinity, so the error says what to do instead of naming serializer options.
     private sealed class FiniteDoubleConverter : JsonConverter<double>
     {
-        public override double Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.GetDouble();
+        public override double Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
 
         public override void Write(Utf8JsonWriter writer, double value, JsonSerializerOptions options) =>
             writer.WriteNumberValue(double.IsFinite(value) ? value : throw new NotFiniteException());
@@ -396,7 +394,7 @@ public static class Kestra
 
     private sealed class FiniteSingleConverter : JsonConverter<float>
     {
-        public override float Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.GetSingle();
+        public override float Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
 
         public override void Write(Utf8JsonWriter writer, float value, JsonSerializerOptions options) =>
             writer.WriteNumberValue(float.IsFinite(value) ? value : throw new NotFiniteException());
@@ -405,8 +403,7 @@ public static class Kestra
     // ISO 8601, such as PT1M30.5S, which Kestra reads as a duration, instead of 00:01:30.5000000.
     private sealed class DurationConverter : JsonConverter<TimeSpan>
     {
-        public override TimeSpan Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-            System.Xml.XmlConvert.ToTimeSpan(reader.GetString()!);
+        public override TimeSpan Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
 
         public override void Write(Utf8JsonWriter writer, TimeSpan value, JsonSerializerOptions options) =>
             writer.WriteStringValue(System.Xml.XmlConvert.ToString(value));
@@ -415,8 +412,7 @@ public static class Kestra
     // System.Text.Json has no BigInteger support and would send its properties. Kestra reads numbers as doubles.
     private sealed class BigIntegerConverter : JsonConverter<BigInteger>
     {
-        public override BigInteger Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-            BigInteger.Parse(Encoding.UTF8.GetString(reader.ValueSpan), CultureInfo.InvariantCulture);
+        public override BigInteger Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => throw new NotSupportedException();
 
         public override void Write(Utf8JsonWriter writer, BigInteger value, JsonSerializerOptions options)
         {
@@ -489,7 +485,7 @@ public sealed class KestraLogger
         {
             text += "\n" + Text(exception);
         }
-        var line = new JsonObject { ["logs"] = new JsonArray(new JsonObject { ["level"] = level, ["message"] = Clean(text) }) };
+        var line = new JsonObject { ["logs"] = new JsonArray(new JsonObject { ["level"] = level, ["message"] = text }) };
         Kestra.SendLine("::" + line.ToJsonString() + "::");
     }
 
@@ -547,24 +543,5 @@ public sealed class KestraLogger
         {
             return "[FAILED ToString()]";
         }
-    }
-
-    // A lone surrogate cannot be written as UTF-8, so it becomes U+FFFD.
-    private static string Clean(string text)
-    {
-        var builder = new StringBuilder(text.Length);
-        for (var i = 0; i < text.Length; i++)
-        {
-            var c = text[i];
-            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-            {
-                builder.Append(c).Append(text[++i]);
-            }
-            else
-            {
-                builder.Append(char.IsSurrogate(c) ? '�' : c);
-            }
-        }
-        return builder.ToString();
     }
 }
