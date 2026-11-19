@@ -39,10 +39,10 @@ tasks:
 |------|------------------|
 | `Kestra.outputs(Map outputs)` | Task outputs under `outputs.<task>.vars` |
 | `Kestra.assets(inputs: [...], outputs: [...])` | Input and output assets of the task |
-| `Kestra.counter(name, value, tags = [:])` | Counter metric |
+| `Kestra.counter(name, value, tags = [:])` or `Kestra.counter(name, value, env: 'qa')` | Counter metric |
 | `Kestra.gauge(name, value, tags = [:])` | Gauge metric |
 | `Kestra.timer(name, seconds, tags = [:])` or `Kestra.timer(name, tags = [:]) { ... }` | Timer metric. A closure is timed and its result returned |
-| `Kestra.logger.trace/debug/info/warn/error(message, Object... args)` | Log line at that level. `{}` placeholders are filled from `args`, and a `Throwable` as the last argument is added with its stack trace, as in SLF4J |
+| `Kestra.logger.trace/debug/info/warn/error(message, Object... args)` | Log line at that level. `{}` placeholders are filled from `args`, and a `Throwable` as the last argument is added with its stack trace, as in SLF4J. A value whose `toString()` throws is logged as `[FAILED toString()]` |
 | `Kestra.context(String path = null)` | The execution context as a map, for example `Kestra.context().labels`. Needs `executionContext: true` on the task. Without `path`, or with an empty one, falls back to the base64 `KESTRA_CONTEXT` variable. A `path` that does not exist throws `FileNotFoundException` |
 
-Tags are optional and sent as strings. Outputs accept maps, lists, arrays, strings, numbers, booleans and null. Dates, `java.time` values, enums, `GString`s, files, paths, URIs and UUIDs are sent as their text. Other objects throw, so convert them first. Two keys that read as the same text, such as `1` and `'1'`, throw instead of one value being lost.
+Tags are optional, given as a map or as named arguments, and sent as strings. Outputs accept maps, lists, arrays, strings, numbers, booleans and null. Dates, `java.time` values and durations, enums, `GString`s, files, paths, URIs and UUIDs are sent as their text. Other objects throw, so convert them first. Two keys that read as the same text, such as `1` and `'1'`, throw instead of one value being lost.

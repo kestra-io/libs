@@ -8,6 +8,7 @@ import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.time.temporal.TemporalAccessor
+import java.time.temporal.TemporalAmount
 
 /**
  * Sends outputs, metrics, logs and assets from Groovy script tasks to Kestra, and reads the execution context.
@@ -50,6 +51,15 @@ class Kestra {
 
     static void timer(String name, Number seconds, Map tags = [:]) { sendMetric(name, 'timer', seconds, tags) }
 
+    // Groovy passes named arguments, as in counter('rows', 3, env: 'qa'), as a first Map.
+    static void counter(Map tags, String name, Object value) { counter(name, value, tags) }
+
+    static void gauge(Map tags, String name, Object value) { gauge(name, value, tags) }
+
+    static void timer(Map tags, String name, Number seconds) { timer(name, seconds, tags) }
+
+    static <T> T timer(Map tags, String name, Closure<T> closure) { timer(name, tags, closure) }
+
     /** Times the closure and returns its result. No metric is sent if it throws. */
     static <T> T timer(String name, Map tags = [:], Closure<T> closure) {
         long start = System.nanoTime()
@@ -79,7 +89,6 @@ class Kestra {
             try {
                 json = new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8)
             } catch (NoSuchFileException ignored) {
-                // Only a missing file falls back. A directory or an unreadable file is a misconfiguration to report.
                 if (isExplicit) {
                     throw new FileNotFoundException("Kestra execution context file '$file' does not exist.")
                 }
@@ -93,6 +102,9 @@ class Kestra {
                     throw new IllegalArgumentException('The KESTRA_CONTEXT environment variable is not valid base64.', e)
                 }
                 source = 'KESTRA_CONTEXT'
+            } catch (IOException e) {
+                // Only a missing file falls back. A directory or an unreadable file is a misconfiguration to report.
+                throw new IOException("Kestra execution context file '$file' cannot be read: ${e.class.simpleName} ${e.message}.", e)
             }
         }
         Object context
@@ -128,22 +140,23 @@ class Kestra {
             throw new IllegalArgumentException("Metric '$name' value must be a finite number.")
         }
         Map<String, String> stringTags = [:]
-        (tags ?: [:]).each { key, tag ->
-            if (tag == null || tag instanceof Map || tag instanceof Collection || tag.getClass().isArray()) {
+        (prepare(tags ?: [:]) as Map).each { key, tag ->
+            if (tag == null || tag instanceof Map || tag instanceof List) {
                 throw new IllegalArgumentException("Metric '$name' tag '$key' must be a single value, for example [env: 'prod'].")
             }
             // Kestra reads tags as a map of strings.
-            stringTags[key.toString()] = tag.toString()
+            stringTags[key] = tag.toString()
         }
         send([metrics: [[name: name, type: type, value: value, tags: stringTags]]])
     }
 
+    // Kestra reads numbers as doubles, so a BigInteger or BigDecimal past the double range would read as Infinity.
     private static boolean isFinite(Object value) {
-        if (value instanceof Double || value instanceof Float) {
-            double number = (value as Number).doubleValue()
-            return !Double.isNaN(number) && !Double.isInfinite(number)
+        if (!(value instanceof Number)) {
+            return false
         }
-        value instanceof Number
+        double number = ((Number) value).doubleValue()
+        !Double.isNaN(number) && !Double.isInfinite(number)
     }
 
     // Copies the value as maps with string keys, lists, strings, numbers, booleans and nulls, which JsonOutput writes as is.
@@ -159,7 +172,7 @@ class Kestra {
             return value
         }
         if (value instanceof CharSequence || value instanceof Character || value instanceof Enum || value instanceof TemporalAccessor
-            || value instanceof UUID || value instanceof URI || value instanceof URL || value instanceof File || value instanceof Path) {
+            || value instanceof TemporalAmount || value instanceof UUID || value instanceof URI || value instanceof URL || value instanceof File || value instanceof Path) {
             return value.toString()
         }
         if (value instanceof Date) {
@@ -188,7 +201,7 @@ class Kestra {
             'boolean or date. Convert it first, for example with toString().')
     }
 
-    /** SLF4J-style logger: `{}` placeholders, and a Throwable as the last argument is appended with its stack trace. */
+    /** SLF4J-style logger: `{}` placeholders, and a Throwable as the last argument is appended with its stack trace. Never throws on its values. */
     static class Logger {
         void trace(Object message, Object... args) { log('TRACE', message, args) }
 
@@ -203,23 +216,36 @@ class Kestra {
         private static void log(String level, Object message, Object[] args) {
             // A single null value reaches varargs as a null array.
             List<Object> values = args == null ? [null] : args as List
-            Throwable error = values && values.last() instanceof Throwable ? values.last() as Throwable : null
-            String text = String.valueOf(message)
+            // As in SLF4J, a trailing Throwable is always the exception, never a placeholder value.
+            Throwable error = values && values.last() instanceof Throwable ? values.remove(values.size() - 1) as Throwable : null
+            String pattern = text(message)
             StringBuilder builder = new StringBuilder()
             int start = 0
             int used = 0
             int index
-            while ((index = text.indexOf('{}', start)) >= 0 && used < values.size()) {
-                builder.append(text, start, index).append(String.valueOf(values[used++]))
+            while ((index = pattern.indexOf('{}', start)) >= 0 && used < values.size()) {
+                builder.append(pattern, start, index).append(text(values[used++]))
                 start = index + 2
             }
-            builder.append(text.substring(start))
-            if (error != null && used < values.size()) {
+            builder.append(pattern.substring(start))
+            if (error != null) {
                 StringWriter trace = new StringWriter()
-                error.printStackTrace(new PrintWriter(trace))
-                builder.append('\n').append(trace.toString().trim())
+                try {
+                    error.printStackTrace(new PrintWriter(trace))
+                    builder.append('\n').append(trace.toString().trim())
+                } catch (Exception ignored) {
+                    builder.append('\n').append(error.getClass().name).append(': [FAILED getMessage()]')
+                }
             }
             send([logs: [[level: level, message: builder.toString()]]])
+        }
+
+        private static String text(Object value) {
+            try {
+                return String.valueOf(value)
+            } catch (Exception ignored) {
+                return '[FAILED toString()]'
+            }
         }
     }
 }

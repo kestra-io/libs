@@ -289,7 +289,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        groovy: ['3.0-jdk11', 'latest']
+        groovy: ['3.0-jdk11', '4.0-jdk17', 'latest']
     container:
       image: groovy:${{ matrix.groovy }}
       # The image runs as the groovy user, which cannot write the checkout.

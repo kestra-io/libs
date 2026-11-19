@@ -66,11 +66,11 @@ test('everyday values become JSON values') {
     String line = Kestra.format([
         gstring: "row ${1}", ch: 'x' as char, day: java.time.DayOfWeek.MONDAY, date: date, instant: new Date(0),
         big: 2G ** 70, decimal: 1.10G, set: [3] as Set, array: [1, 2] as int[], iterator: [4].iterator(),
-        uuid: UUID.fromString('00000000-0000-0000-0000-000000000001'), file: new File('/data/a.csv'), compare: 3 > 1, (1): 'one',
+        duration: java.time.Duration.ofSeconds(90), uuid: UUID.fromString('00000000-0000-0000-0000-000000000001'), file: new File('/data/a.csv'), compare: 3 > 1, (1): 'one',
     ])
     assert line == '::{"gstring":"row 1","ch":"x","day":"MONDAY","date":"2026-01-02","instant":"1970-01-01T00:00:00Z",' +
         '"big":1180591620717411303424,"decimal":1.10,"set":[3],"array":[1,2],"iterator":[4],' +
-        '"uuid":"00000000-0000-0000-0000-000000000001","file":"/data/a.csv","compare":true,"1":"one"}::'
+        '"duration":"PT1M30S","uuid":"00000000-0000-0000-0000-000000000001","file":"/data/a.csv","compare":true,"1":"one"}::'
 }
 
 test('outputs refuse values Kestra cannot read') {
@@ -98,10 +98,12 @@ test('metrics send numbers and string tags, and empty tags as {}') {
         Kestra.counter('rows', 3, [source: 'shop', retried: false, shard: 2, (1): 'x'])
         Kestra.gauge('size', 2.5G)
         Kestra.timer('fetch', 1.25)
+        Kestra.counter('rows', 1, env: 'qa', day: java.time.LocalDate.of(2026, 1, 2))
     }
     assert lines == '::{"metrics":[{"name":"rows","type":"counter","value":3,"tags":{"source":"shop","retried":"false","shard":"2","1":"x"}}]}::\n' +
         '::{"metrics":[{"name":"size","type":"gauge","value":2.5,"tags":{}}]}::\n' +
-        '::{"metrics":[{"name":"fetch","type":"timer","value":1.25,"tags":{}}]}::\n'
+        '::{"metrics":[{"name":"fetch","type":"timer","value":1.25,"tags":{}}]}::\n' +
+        '::{"metrics":[{"name":"rows","type":"counter","value":1,"tags":{"env":"qa","day":"2026-01-02"}}]}::\n'
 }
 
 test('metrics refuse values Kestra would drop') {
@@ -111,11 +113,15 @@ test('metrics refuse values Kestra would drop') {
     }
     assert errorOf { Kestra.counter('rows', 1, [env: ['a']]) }.message == "Metric 'rows' tag 'env' must be a single value, for example [env: 'prod']."
     assert errorOf { Kestra.counter('rows', 1, [env: null]) }.message == "Metric 'rows' tag 'env' must be a single value, for example [env: 'prod']."
+    assert errorOf { Kestra.counter('rows', 1, [(1): 'a', '1': 'b']) }.message == "This value cannot be sent to Kestra as JSON: two keys read as '1'."
+    [2G ** 2000, new BigDecimal('1E+400')].each { value ->
+        assert errorOf { Kestra.gauge('size', value) }.message == "Metric 'size' value must be a finite number."
+    }
 }
 
 test('a timed closure returns its result, and sends no metric when it throws') {
     def result
-    String line = capture { result = Kestra.timer('fetch', [env: 'qa']) { Thread.sleep(20); [1, 2] } }
+    String line = capture { result = Kestra.timer('fetch', env: 'qa') { Thread.sleep(20); [1, 2] } }
     assert result == [1, 2]
     def matcher = line =~ /^::\{"metrics":\[\{"name":"fetch","type":"timer","value":([0-9.E-]+),"tags":\{"env":"qa"\}\}\]\}::\n$/
     assert matcher.matches() && (matcher.group(1) as double) >= 0.015
@@ -129,6 +135,8 @@ test('logger levels, placeholders and a trailing exception') {
         Kestra.logger.info('{} and {}', null)
         Kestra.logger.warn('100% {}')
         Kestra.logger.error('failed {}', 'x', new IllegalStateException('boom'))
+        Kestra.logger.info('a {} {}', new Object() { String toString() { throw new IllegalStateException('bad') } })
+        Kestra.logger.warn('b {}', new IllegalStateException('consumed'))
     }
     List<String> rows = lines.readLines()
     assert rows[0..3] == [
@@ -137,7 +145,9 @@ test('logger levels, placeholders and a trailing exception') {
         '::{"logs":[{"level":"INFO","message":"null and {}"}]}::',
         '::{"logs":[{"level":"WARN","message":"100% {}"}]}::',
     ]
-    assert rows.size() == 5 && rows[4].startsWith('::{"logs":[{"level":"ERROR","message":"failed x\\njava.lang.IllegalStateException: boom\\n\\tat ')
+    assert rows[5] == '::{"logs":[{"level":"INFO","message":"a [FAILED toString()] {}"}]}::'
+    assert rows[6].startsWith('::{"logs":[{"level":"WARN","message":"b {}\\njava.lang.IllegalStateException: consumed\\n\\tat ')
+    assert rows.size() == 7 && rows[4].startsWith('::{"logs":[{"level":"ERROR","message":"failed x\\njava.lang.IllegalStateException: boom\\n\\tat ')
 }
 
 test('assets keep empty lists and empty metadata') {
@@ -187,7 +197,7 @@ test('context errors name their cause') {
     assert run(dir, [:], print).startsWith('IllegalArgumentException: The execution context in .kestra-execution-context.json is not valid JSON: ')
     assert run(tempDir(), [KESTRA_CONTEXT: '{"a":1}'], print) == 'IllegalArgumentException: The KESTRA_CONTEXT environment variable is not valid base64.'
     assert run(tempDir(), [KESTRA_CONTEXT: base64('[]')], print) == 'IllegalArgumentException: The execution context in KESTRA_CONTEXT is not a JSON object.'
-    assert run(tempDir(), [KESTRA_EXECUTION_CONTEXT_FILE: tempDir().path, KESTRA_CONTEXT: base64('{"a":1}')], print) == 'IOException: Is a directory'
+    assert run(tempDir(), [KESTRA_EXECUTION_CONTEXT_FILE: tempDir().path, KESTRA_CONTEXT: base64('{"a":1}')], print).startsWith("IOException: Kestra execution context file '/tmp/kestra-ctx-")
     assert run(tempDir(), [:], print) == "FileNotFoundException: No Kestra execution context found: '.kestra-execution-context.json' does not exist " +
         'and the KESTRA_CONTEXT environment variable is not set. The execution context is only available when the script runs inside a Kestra task.'
 }
