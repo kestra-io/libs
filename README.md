@@ -53,6 +53,7 @@ Libraries to interact with metrics and outputs in Kestra script tasks.
 | Ruby | [`ruby/`](ruby/) |
 | PHP | [`php/`](php/) |
 | Perl | [`perl/`](perl/) |
+| Julia | [`julia/`](julia/) |
 
 ![Kestra orchestrator](https://kestra.io/video.gif)
 
