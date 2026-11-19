@@ -217,12 +217,13 @@ local function send_metric(name, metric_type, value, tags)
     fail("Metric '" .. name .. "' tags must be a table of names to values, for example { env = 'prod' }.")
   end
   local string_tags = {}
-  for key, tag in next, tags or {} do
+  for tag_key, tag in next, tags or {} do
+    local key = tag_key
     if type(key) ~= 'string' and type(key) ~= 'number' then
       fail("Metric '" .. name .. "' tags must be a table of names to values, for example { env = 'prod' }.")
     end
     -- As in Python, a number key is sent as its text.
-    key = type(key) == 'number' and number_text(key) or key
+    if type(key) == 'number' then key = number_text(key) end
     if string_tags[key] then
       fail("Metric '" .. name .. "' has two tags named '" .. key .. "'.")
     end
