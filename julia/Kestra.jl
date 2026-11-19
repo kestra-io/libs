@@ -27,7 +27,7 @@ function write_string(io::IO, s::AbstractString, is_lenient::Bool)
     print(io, '"')
     for c in s
         if !isvalid(c)
-            print(io, '�')
+            print(io, '\ufffd')
         elseif c == '"' || c == '\\'
             print(io, '\\', c)
         elseif c == '\n'
@@ -158,7 +158,7 @@ function send_metric(name, type, value, tags)
             throw(ArgumentError("Metric '$name' tag '$text' must be a single value, for example (env = \"prod\",)."))
         end
         # Kestra reads tags as a map of strings.
-        string_tags[text] = string(tag)
+        string_tags[text] = sprint(print, tag)
     end
     send(Dict("metrics" => [(name = name, type = type, value = value, tags = string_tags)]))
 end
@@ -186,6 +186,8 @@ returns its result. No metric is sent if it throws.
 """
 timer(name, seconds, tags = nothing) = send_metric(name, "timer", seconds, tags)
 timer(name, duration::FixedPeriod, tags = nothing) = send_metric(name, "timer", Dates.toms(duration) / 1000, tags)
+timer(name, ::Union{Period,Dates.CompoundPeriod}, tags = nothing) =
+    throw(ArgumentError("Metric '$name' value must be seconds or a fixed period such as Millisecond(1500). Months and years vary in length."))
 # Python's order, timer(name, f), as well as the do-block order.
 timer(name, f::Function, tags = nothing) = timer(f, name, tags)
 function timer(f::Function, name, tags = nothing)
@@ -239,7 +241,9 @@ other logging macros send their records to Kestra. Levels below `Debug` are sent
 logger() = LOGGER
 
 Logging.min_enabled_level(::Logger) = BelowMinLevel
-Logging.shouldlog(::Logger, level, _module, group, id) = true
+# Julia's own Base and Core debug records, such as package loading, are not the script's logs.
+Logging.shouldlog(::Logger, level, _module, group, id) =
+    level >= Info || !(_module isa Module && Base.moduleroot(_module) in (Base, Core))
 Logging.catch_exceptions(::Logger) = true
 
 function Logging.handle_message(logger::Logger, level, message, _module, group, id, file, line; maxlog = nothing, kwargs...)
@@ -250,7 +254,10 @@ function Logging.handle_message(logger::Logger, level, message, _module, group, 
     io = IOBuffer()
     print(io, text(message))
     for (key, value) in kwargs
-        key === :exception ? print(io, '\n', exception_text(value)) : print(io, ' ', key, '=', text(value))
+        key === :exception && (print(io, '\n', exception_text(value)); continue)
+        value_text = text(value)
+        # Quoted like Go's slog when it would not read as one value.
+        print(io, ' ', key, '=', isempty(value_text) || any(c -> isspace(c) || c in "=\"", value_text) ? repr(value_text) : value_text)
     end
     line = IOBuffer()
     print(line, "::{\"logs\":[{\"level\":\"", level_name(level), "\",\"message\":")
@@ -364,7 +371,7 @@ function parse_string(p::Parser)
                     low = UInt32(parse_hex4(p))
                     code = 0xdc00 <= low <= 0xdfff ? 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00) : (p.i -= 6; 0xfffd)
                 end
-                print(out, 0xd800 <= code <= 0xdfff ? '�' : Char(code))
+                print(out, 0xd800 <= code <= 0xdfff ? '\ufffd' : Char(code))
             else
                 escaped = Dict(UInt8('"') => '"', UInt8('\\') => '\\', UInt8('/') => '/', UInt8('b') => '\b',
                     UInt8('f') => '\f', UInt8('n') => '\n', UInt8('r') => '\r', UInt8('t') => '\t')
@@ -431,8 +438,8 @@ function context(path::Union{Nothing,AbstractString} = nothing)
             # SystemError appends the errno text, so these read "...: No such file or directory".
             is_explicit && throw(SystemError("Kestra execution context file '$file'", Libc.ENOENT))
             encoded = replace(get(ENV, "KESTRA_CONTEXT", ""), r"\s" => "")
-            isempty(encoded) && throw(SystemError("No Kestra execution context found, the KESTRA_CONTEXT environment variable is not set " *
-                "and the execution context is only available when the script runs inside a Kestra task. Context file '$file'", Libc.ENOENT))
+            isempty(encoded) && throw(SystemError("No Kestra execution context found. It is only available when the script runs inside a " *
+                "Kestra task, and the KESTRA_CONTEXT environment variable is not set. Reading '$file'", Libc.ENOENT))
             occursin(BASE64, encoded) || throw(ArgumentError("The KESTRA_CONTEXT environment variable is not valid base64."))
             json = String(base64decode(encoded))
             source = "KESTRA_CONTEXT"

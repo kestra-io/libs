@@ -123,6 +123,18 @@ Base.string(::Sneaky) = Unprintable()
         @test capture(() -> @test_throws ErrorException Kestra.timer(() -> error("boom"), "fetch")) == ""
         @test capture(() -> @test(Kestra.timer("fetch", () -> 7) == 7)) != ""
         @test_throws ArgumentError Kestra.timer("fetch", Dates.Month(1))
+        @test_throws ArgumentError Kestra.timer("fetch", Dates.canonicalize(Millisecond(90_000)))
+    end
+
+    @testset "lines from several threads never mix, and Base debug records are not sent" begin
+        lines = capture() do
+            Threads.@threads for i in 1:200
+                Kestra.counter("rows", i, (thread = Threads.threadid(),))
+            end
+            with_logger(() -> @debug("loading", _module = Base), Kestra.logger())
+        end
+        logs = split(chomp(lines), '\n')
+        @test length(logs) == 200 && all(l -> occursin(r"^::\{\"metrics\".*\}::$", l), logs)
     end
 
     @testset "the logger sends each level, key-value pairs and exceptions, and never fails" begin
@@ -132,7 +144,7 @@ Base.string(::Sneaky) = Unprintable()
             with_logger(Kestra.logger()) do
                 @logmsg Logging.Debug - 1 "t"
                 @debug "d"
-                @info "rows" n = 3 bad = Unprintable()
+                @info "rows" n = 3 bad = Unprintable() s = "a b" e = "" q = "x=1"
                 @warn "caf\xe9 \u2028 two\nlines"
                 @error "failed" exception = (ErrorException("boom"), backtrace())
                 @info Unprintable()
@@ -147,7 +159,7 @@ Base.string(::Sneaky) = Unprintable()
         @test logs[1:4] == [
             "::{\"logs\":[{\"level\":\"TRACE\",\"message\":\"t\"}]}::",
             "::{\"logs\":[{\"level\":\"DEBUG\",\"message\":\"d\"}]}::",
-            "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"rows n=3 bad=[FAILED string()]\"}]}::",
+            "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"rows n=3 bad=\\\"[FAILED string()]\\\" s=\\\"a b\\\" e=\\\"\\\" q=\\\"x=1\\\"\"}]}::",
             "::{\"logs\":[{\"level\":\"WARN\",\"message\":\"caf� \\u2028 two\\nlines\"}]}::",
         ]
         @test startswith(logs[5], "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"failed\\nboom\\nStacktrace:")

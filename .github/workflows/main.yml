@@ -298,7 +298,8 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Test
-        run: julia test/runtests.jl
+        # Two threads, so the test that writes from several threads runs them in parallel.
+        run: julia --threads 2 test/runtests.jl
 
   release:
     name: Create GitHub Release
