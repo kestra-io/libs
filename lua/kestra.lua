@@ -213,10 +213,18 @@ local function send_metric(name, metric_type, value, tags)
   if tags ~= nil and type(tags) ~= 'table' then
     fail("Metric '" .. name .. "' tags must be a table, for example { env = 'prod' }.")
   end
+  if tags ~= nil and next(tags) ~= nil and table_kind(tags) == 'array' then
+    fail("Metric '" .. name .. "' tags must be a table of names to values, for example { env = 'prod' }.")
+  end
   local string_tags = {}
   for key, tag in next, tags or {} do
-    if type(key) ~= 'string' then
+    if type(key) ~= 'string' and type(key) ~= 'number' then
       fail("Metric '" .. name .. "' tags must be a table of names to values, for example { env = 'prod' }.")
+    end
+    -- As in Python, a number key is sent as its text.
+    key = type(key) == 'number' and number_text(key) or key
+    if string_tags[key] then
+      fail("Metric '" .. name .. "' has two tags named '" .. key .. "'.")
     end
     local kind = type(tag)
     if kind ~= 'string' and kind ~= 'number' and kind ~= 'boolean' then

@@ -116,11 +116,11 @@ end)
 
 test('metrics send numbers and string tags, and empty tags as {}', function()
   local lines = capture(function()
-    kestra.counter('rows', 3, { source = 'shop', retried = false, shard = 2, ratio = 0.5 })
+    kestra.counter('rows', 3, { source = 'shop', retried = false, shard = 2, ratio = 0.5, [7] = 'x' })
     kestra.gauge('size', 2.5)
     kestra.timer('fetch', 1.25, {})
   end)
-  eq(lines, '::{"metrics":[{"name":"rows","tags":{"ratio":"0.5","retried":"false","shard":"2","source":"shop"},"type":"counter","value":3}]}::\n'
+  eq(lines, '::{"metrics":[{"name":"rows","tags":{"7":"x","ratio":"0.5","retried":"false","shard":"2","source":"shop"},"type":"counter","value":3}]}::\n'
     .. '::{"metrics":[{"name":"size","tags":{},"type":"gauge","value":2.5}]}::\n'
     .. '::{"metrics":[{"name":"fetch","tags":{},"type":"timer","value":1.25}]}::\n')
 end)
@@ -133,6 +133,7 @@ test('metrics refuse values Kestra would drop', function()
   eq(error_of(function() kestra.counter('rows', 1, 'prod') end), "Metric 'rows' tags must be a table, for example { env = 'prod' }.")
   eq(error_of(function() kestra.counter('rows', 1, { 'prod' }) end),
     "Metric 'rows' tags must be a table of names to values, for example { env = 'prod' }.")
+  eq(error_of(function() kestra.counter('rows', 1, { [1] = 'a', ['1'] = 'b' }) end), "Metric 'rows' has two tags named '1'.")
   eq(error_of(function() kestra.counter('rows', 1, { env = {} }) end), "Metric 'rows' tag 'env' must be a string, number or boolean.")
 end)
 
