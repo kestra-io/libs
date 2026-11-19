@@ -265,9 +265,15 @@ for method, level in pairs(LEVELS) do
         local kind = type(args[i])
         if kind ~= 'string' and kind ~= 'number' then args[i] = tostring(args[i]) end
       end
-      message = string.format(tostring(message), unpack(args, first + 1, args.n))
+      local ok, formatted = pcall(string.format, tostring(message), unpack(args, first + 1, args.n))
+      -- A pattern that does not match its values is logged as is, with the values after it, so a log call never fails.
+      if not ok then
+        for i = first + 1, args.n do args[i] = tostring(args[i]) end
+        formatted = tostring(message) .. ' ' .. table.concat(args, ' ', first + 1, args.n)
+      end
+      message = formatted
     end
-    -- Invalid UTF-8 becomes U+FFFD, so a log call never fails on its text.
+    -- Invalid UTF-8 becomes U+FFFD.
     local text = string_json(tostring(message), true)
     send_line('::{"logs":[{"level":"' .. level .. '","message":' .. text .. '}]}::')
   end

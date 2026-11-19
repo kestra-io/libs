@@ -161,6 +161,7 @@ test('logger levels, format values and both call styles', function()
     kestra.logger:debug('%d rows, %s %s %s', 3, nil, true, 'x')
     kestra.logger.info('dot call')
     kestra.logger:warn('100%')
+    kestra.logger:info('%d rows', 'many')
     kestra.logger:error(nil)
     kestra.logger:fatal('caf\233 \226\128\168')
   end)
@@ -168,6 +169,7 @@ test('logger levels, format values and both call styles', function()
     .. '::{"logs":[{"level":"DEBUG","message":"3 rows, nil true x"}]}::\n'
     .. '::{"logs":[{"level":"INFO","message":"dot call"}]}::\n'
     .. '::{"logs":[{"level":"WARN","message":"100%"}]}::\n'
+    .. '::{"logs":[{"level":"INFO","message":"%d rows many"}]}::\n'
     .. '::{"logs":[{"level":"ERROR","message":"nil"}]}::\n'
     .. '::{"logs":[{"level":"ERROR","message":"caf\239\191\189 \\u2028"}]}::\n')
 end)

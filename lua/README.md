@@ -47,9 +47,9 @@ tasks:
 | `kestra.gauge(name, value, tags)` | Gauge metric |
 | `kestra.timer(name, seconds, tags)` or `kestra.timer(name, fn, tags)` | Timer metric. A function is timed and its results returned |
 | `kestra.logger:trace/debug/info/warn/error/fatal(message, ...)` | Log line at that level. With more values, `message` is a `string.format` pattern. `fatal` is sent as ERROR |
-| `kestra.context(path)` | The execution context as a table, for example `kestra.context().labels`. Needs `executionContext: true` on the task. Without `path`, falls back to the base64 `KESTRA_CONTEXT` variable. A `path` that does not exist fails |
+| `kestra.context(path)` | The execution context as a table, for example `kestra.context().labels`. Needs `executionContext: true` on the task. Without `path`, or with an empty one, falls back to the base64 `KESTRA_CONTEXT` variable. A `path` that does not exist fails |
 | `kestra.array(t)` | Marks `t`, or a new table, to be sent as a JSON list |
 
-A table with the keys 1 to n is sent as a list, and any other table as an object with string keys, so `{ [1001] = 'a' }` is sent as `{"1001": "a"}`. An empty table is sent as `{}`: use `kestra.array()` for an empty list. Empty asset `inputs` and `outputs` are sent as lists already. Tags are optional and sent as strings. Lua strings are bytes: outputs must be valid UTF-8, and invalid bytes in a log message become U+FFFD. JSON `null` in the context reads as `nil`.
+A table with the keys 1 to n is sent as a list, and any other table as an object with string keys, so `{ [1001] = 'a' }` is sent as `{"1001": "a"}`. An empty table is sent as `{}`: use `kestra.array()` for an empty list. Empty asset `inputs` and `outputs` are sent as lists already. Tags are optional and sent as strings. Lua strings are bytes: outputs must be valid UTF-8, and invalid bytes in a log message become U+FFFD. A log call never fails: a pattern that does not match its values is logged as is, with the values after it. JSON `null` in the context reads as `nil`.
 
 Plain Lua has no precise clock, so a timed function is measured in 10 ms steps on Linux and in seconds elsewhere. Pass seconds measured with your own clock for anything shorter.
