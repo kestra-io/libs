@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 /// <summary>
 /// Sends outputs, metrics, logs and assets from C# and F# script tasks to Kestra, and reads the execution context.
@@ -26,10 +27,35 @@ public static class Kestra
     private static readonly JsonSerializerOptions Options = new()
     {
         MaxDepth = MaxDepth,
-        Converters = { new JsonStringEnumConverter(), new BigIntegerConverter(), new TupleConverterFactory() },
+        // Fields too, or a class or struct with public fields would be sent as {}.
+        IncludeFields = true,
+        // Without compiler backing fields, such as the name@ fields F# 8 makes public in anonymous records.
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver
+        {
+            Modifiers =
+            {
+                info =>
+                {
+                    for (var i = info.Properties.Count - 1; i >= 0; i--)
+                    {
+                        if (info.Properties[i].AttributeProvider is System.Reflection.FieldInfo field
+                            && (field.Name.Contains('@') || field.IsDefined(typeof(CompilerGeneratedAttribute), false)))
+                        {
+                            info.Properties.RemoveAt(i);
+                        }
+                    }
+                },
+            },
+        },
+        Converters =
+        {
+            new JsonStringEnumConverter(), new BigIntegerConverter(), new TupleConverterFactory(),
+            new FiniteDoubleConverter(), new FiniteSingleConverter(), new DurationConverter(),
+        },
     };
 
     private static readonly JsonNodeOptions NodeOptions = new();
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static string? contextJson;
 
     /// <summary>The logger that sends lines to Kestra at TRACE, DEBUG, INFO, WARN and ERROR.</summary>
@@ -94,9 +120,11 @@ public static class Kestra
     public static T Timer<T>(string name, Func<T> function, object? tags = null)
     {
         // Timing an async lambda here would measure only the start of the task.
-        if (typeof(Task).IsAssignableFrom(typeof(T)) || typeof(T).Name.StartsWith("ValueTask", StringComparison.Ordinal))
+        if (typeof(Task).IsAssignableFrom(typeof(T)) || typeof(T).Name.StartsWith("ValueTask", StringComparison.Ordinal)
+            || (typeof(T).FullName?.StartsWith("Microsoft.FSharp.Control.FSharpAsync", StringComparison.Ordinal) ?? false))
         {
-            throw new ArgumentException($"Timer '{name}' got an async function. Use await Kestra.TimerAsync(...) so the time covers the whole task.", nameof(function));
+            throw new ArgumentException($"Timer '{name}' got an async function. Use await Kestra.TimerAsync(...) so the time covers the whole task, " +
+                "with Async.StartAsTask in F#.", nameof(function));
         }
         var start = Stopwatch();
         var result = function();
@@ -135,7 +163,8 @@ public static class Kestra
     /// read once, and each call returns a new object the caller may change.
     /// </summary>
     /// <exception cref="FileNotFoundException">No context is found, or <paramref name="path"/> does not exist.</exception>
-    /// <exception cref="IOException">The context file is a directory or cannot be read.</exception>
+    /// <exception cref="IOException">The context file is a directory.</exception>
+    /// <exception cref="UnauthorizedAccessException">The context file cannot be read.</exception>
     /// <exception cref="FormatException"><c>KESTRA_CONTEXT</c> is not base64.</exception>
     /// <exception cref="JsonException">The context is not valid JSON, or not a JSON object.</exception>
     public static JsonObject Context(string? path = null)
@@ -153,7 +182,11 @@ public static class Kestra
             }
             try
             {
-                json = File.ReadAllText(file, Encoding.UTF8);
+                json = File.ReadAllText(file, StrictUtf8);
+            }
+            catch (DecoderFallbackException e)
+            {
+                throw new JsonException($"The execution context in {file} is not valid JSON: it is not valid UTF-8.", e);
             }
             // Only a missing file falls back. An unreadable file is a misconfiguration to report.
             catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
@@ -180,7 +213,7 @@ public static class Kestra
                 source = "KESTRA_CONTEXT";
                 try
                 {
-                    json = new UTF8Encoding(false, true).GetString(bytes);
+                    json = StrictUtf8.GetString(bytes);
                 }
                 catch (DecoderFallbackException decoderException)
                 {
@@ -192,8 +225,10 @@ public static class Kestra
         try
         {
             node = JsonNode.Parse(json, NodeOptions, new JsonDocumentOptions { MaxDepth = MaxDepth });
+            // JsonObject finds duplicate keys only when read, so read them all now instead of failing later on a key.
+            Validate(node);
         }
-        catch (JsonException e)
+        catch (Exception e) when (e is JsonException or ArgumentException)
         {
             throw new JsonException($"The execution context in {source} is not valid JSON: {e.Message}", e);
         }
@@ -229,18 +264,26 @@ public static class Kestra
         {
             node = JsonSerializer.SerializeToNode(value, Options);
         }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or JsonException or InvalidOperationException)
+        // Any error, including one thrown by a property getter, means the value cannot be sent.
+        catch (Exception e) when (e is not OutOfMemoryException)
         {
-            throw new ArgumentException($"This value cannot be sent to Kestra as JSON: {e.Message} Replace NaN and Infinity with null, and convert other values first.", e);
+            var reason = e switch
+            {
+                NotFiniteException => "replace NaN and Infinity with null.",
+                JsonException when e.Message.Contains("cycle", StringComparison.Ordinal) => "it is nested too deep or contains itself.",
+                _ => e.Message + " Convert it first, for example with ToString().",
+            };
+            throw new ArgumentException($"This value cannot be sent to Kestra as JSON: {reason}", e);
         }
         try
         {
-            // A Hashtable with the keys 1 and "1" serializes two equal JSON keys, which fail here instead of dropping a value.
+            // A Hashtable with the keys 1 and "1" serializes two equal JSON keys. JsonObject finds them only when read,
+            // so read them all now and fail instead of sending one value twice.
             Validate(node);
         }
         catch (ArgumentException e) when (e is not ArgumentNullException)
         {
-            throw new ArgumentException($"This value cannot be sent to Kestra as JSON: {e.Message}", e);
+            throw new ArgumentException("This value cannot be sent to Kestra as JSON: two keys read as the same text, such as 1 and \"1\".", e);
         }
         return node;
     }
@@ -338,6 +381,37 @@ public static class Kestra
         }
     }
 
+    private sealed class NotFiniteException : Exception
+    {
+    }
+
+    // Throws a type of its own for NaN and Infinity, so the error says what to do instead of naming serializer options.
+    private sealed class FiniteDoubleConverter : JsonConverter<double>
+    {
+        public override double Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.GetDouble();
+
+        public override void Write(Utf8JsonWriter writer, double value, JsonSerializerOptions options) =>
+            writer.WriteNumberValue(double.IsFinite(value) ? value : throw new NotFiniteException());
+    }
+
+    private sealed class FiniteSingleConverter : JsonConverter<float>
+    {
+        public override float Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.GetSingle();
+
+        public override void Write(Utf8JsonWriter writer, float value, JsonSerializerOptions options) =>
+            writer.WriteNumberValue(float.IsFinite(value) ? value : throw new NotFiniteException());
+    }
+
+    // ISO 8601, such as PT1M30.5S, which Kestra reads as a duration, instead of 00:01:30.5000000.
+    private sealed class DurationConverter : JsonConverter<TimeSpan>
+    {
+        public override TimeSpan Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            System.Xml.XmlConvert.ToTimeSpan(reader.GetString()!);
+
+        public override void Write(Utf8JsonWriter writer, TimeSpan value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(System.Xml.XmlConvert.ToString(value));
+    }
+
     // System.Text.Json has no BigInteger support and would send its properties. Kestra reads numbers as doubles.
     private sealed class BigIntegerConverter : JsonConverter<BigInteger>
     {
@@ -404,7 +478,13 @@ public sealed class KestraLogger
 
     private static void Log(string level, Exception? exception, string? message, object?[]? args)
     {
-        var text = Fill(message ?? "", args ?? new object?[] { null });
+        args ??= new object?[] { null };
+        var text = Fill(message ?? "", args, out var used);
+        // Error("failed", e) puts the exception in args. A trailing exception the template does not use is logged as the exception.
+        if (exception is null && used < args.Length && args[^1] is Exception trailing)
+        {
+            exception = trailing;
+        }
         if (exception is not null)
         {
             text += "\n" + Text(exception);
@@ -414,10 +494,10 @@ public sealed class KestraLogger
     }
 
     // Fills {Name}, {Name:format} and {Name,alignment} in order, as Microsoft.Extensions.Logging does.
-    private static string Fill(string template, object?[] args)
+    private static string Fill(string template, object?[] args, out int used)
     {
         var builder = new StringBuilder();
-        var used = 0;
+        used = 0;
         for (var i = 0; i < template.Length; i++)
         {
             var c = template[i];
@@ -434,8 +514,16 @@ public sealed class KestraLogger
                 continue;
             }
             var hole = template.Substring(i + 1, end - i - 1);
-            var format = hole.IndexOf(':') is var colon and >= 0 ? hole[(colon + 1)..] : null;
-            builder.Append(Text(args[used++], format));
+            var colon = hole.IndexOf(':');
+            var format = colon >= 0 ? hole[(colon + 1)..] : null;
+            var name = colon >= 0 ? hole[..colon] : hole;
+            var text = Text(args[used++], format);
+            var comma = name.IndexOf(',');
+            if (comma >= 0 && int.TryParse(name[(comma + 1)..], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var width))
+            {
+                text = width < 0 ? text.PadRight(-width) : text.PadLeft(width);
+            }
+            builder.Append(text);
             i = end;
         }
         return builder.ToString();
@@ -450,7 +538,8 @@ public sealed class KestraLogger
                 null => "null",
                 IFormattable formattable => formattable.ToString(format, CultureInfo.InvariantCulture),
                 string or Exception => value.ToString() ?? "",
-                IEnumerable items => "[" + string.Join(", ", items.Cast<object?>().Select(item => Text(item))) + "]",
+                // Items are not expanded further, so a list that contains itself cannot recurse.
+                IEnumerable items => "[" + string.Join(", ", items.Cast<object?>().Select(item => Text(item is string or not IEnumerable ? item : item.GetType().Name))) + "]",
                 _ => value.ToString() ?? "",
             };
         }

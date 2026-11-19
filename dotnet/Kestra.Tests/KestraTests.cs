@@ -9,6 +9,16 @@ using Xunit;
 
 public enum Tier { Gold, Silver }
 
+public sealed class Fields
+{
+    public int Count = 42;
+}
+
+public sealed class Throwing
+{
+    public int Value => throw new InvalidOperationException("getter");
+}
+
 public sealed class Unprintable
 {
     public override string ToString() => throw new InvalidOperationException("boom");
@@ -90,7 +100,8 @@ public class KestraTests : IDisposable
             none = (string?)null,
             day = new DateOnly(2026, 1, 2),
             at = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc),
-            took = TimeSpan.FromMilliseconds(1500),
+            took = TimeSpan.FromSeconds(90.5),
+            fields = new Fields(),
             tier = Tier.Gold,
             ids = new[] { 1, 2 },
             pair = (1, "a"),
@@ -100,7 +111,7 @@ public class KestraTests : IDisposable
             id = Guid.Empty,
         }));
         Assert.Equal("::{\"outputs\":{\"rows\":42,\"ok\":false,\"ratio\":1.5,\"big\":1180591620717411303424,\"f32\":0.1,\"none\":null," +
-            "\"day\":\"2026-01-02\",\"at\":\"2026-01-02T03:04:05Z\",\"took\":\"00:00:01.5000000\",\"tier\":\"Gold\",\"ids\":[1,2],\"pair\":[1,\"a\"],\"triple\":[1,2,3],\"set\":[\"a\"]," +
+            "\"day\":\"2026-01-02\",\"at\":\"2026-01-02T03:04:05Z\",\"took\":\"PT1M30.5S\",\"fields\":{\"Count\":42},\"tier\":\"Gold\",\"ids\":[1,2],\"pair\":[1,\"a\"],\"triple\":[1,2,3],\"set\":[\"a\"]," +
             "\"nested\":{\"country\":\"FR\",\"tiers\":[\"gold\"]},\"id\":\"00000000-0000-0000-0000-000000000000\"}}::\n", output);
     }
 
@@ -123,11 +134,12 @@ public class KestraTests : IDisposable
         var colliding = new Hashtable { [1] = "a", ["1"] = "b" };
         foreach (var (value, message) in new (object, string)[]
         {
-            (double.NaN, "Replace NaN and Infinity"),
-            (float.PositiveInfinity, "Replace NaN and Infinity"),
+            (double.NaN, "This value cannot be sent to Kestra as JSON: replace NaN and Infinity with null."),
+            (float.PositiveInfinity, "This value cannot be sent to Kestra as JSON: replace NaN and Infinity with null."),
             (BigInteger.Pow(10, 400), "past the double range"),
-            (loop, "cannot be sent to Kestra as JSON"),
-            (colliding, "cannot be sent to Kestra as JSON"),
+            (loop, "This value cannot be sent to Kestra as JSON: it is nested too deep or contains itself."),
+            (colliding, "This value cannot be sent to Kestra as JSON: two keys read as the same text, such as 1 and \"1\"."),
+            (new Throwing(), "Convert it first"),
         })
         {
             Assert.Contains(message, ErrorOf<ArgumentException>(() => Kestra.Outputs(new { v = value })).Message);
@@ -230,6 +242,10 @@ public class KestraTests : IDisposable
             Kestra.Logger.Warning("caf\u00e9 \u2028 two\nlines \ud800");
             Kestra.Logger.Error(error, "query failed");
             Kestra.Logger.Critical("down {Value}", null);
+            Kestra.Logger.Error("failed {Id}", "x", error);
+            var loop = new List<object>();
+            loop.Add(loop);
+            Kestra.Logger.Information("[{Count,4}] [{Name,-3}] {Loop}", 3, "a", loop);
         }).TrimEnd('\n').Split('\n');
         Assert.Equal(new[]
         {
@@ -239,6 +255,8 @@ public class KestraTests : IDisposable
             "::{\"logs\":[{\"level\":\"WARN\",\"message\":\"caf\\u00E9 \\u2028 two\\nlines \\uFFFD\"}]}::",
             "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"query failed\\nSystem.InvalidOperationException: db down\"}]}::",
             "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"down null\"}]}::",
+            "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"failed x\\nSystem.InvalidOperationException: db down\"}]}::",
+            "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"[   3] [a  ] [List\\u00601]\"}]}::",
         }, lines);
     }
 
@@ -303,6 +321,15 @@ public class KestraTests : IDisposable
     {
         InDir((Kestra.ContextFile, content));
         Assert.StartsWith(message, Assert.Throws<JsonException>(() => Kestra.Context()).Message);
+    }
+
+    [Fact]
+    public void DuplicateKeysAndInvalidUtf8InTheFileFailWhenRead()
+    {
+        InDir(("dup.json", "{\"a\":1,\"a\":2}"));
+        Assert.StartsWith("The execution context in dup.json is not valid JSON: ", Assert.Throws<JsonException>(() => Kestra.Context("dup.json")).Message);
+        File.WriteAllBytes("bad.json", new byte[] { (byte)'{', (byte)'"', (byte)'a', (byte)'"', (byte)':', (byte)'"', 0xff, (byte)'"', (byte)'}' });
+        Assert.Equal("The execution context in bad.json is not valid JSON: it is not valid UTF-8.", Assert.Throws<JsonException>(() => Kestra.Context("bad.json")).Message);
     }
 
     [Fact]
