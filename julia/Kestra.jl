@@ -37,7 +37,7 @@ function write_string(io::IO, s::AbstractString, is_lenient::Bool)
         elseif c == '\t'
             print(io, "\\t")
         # Java reads U+0085, U+2028 and U+2029 as line terminators, which would split the line.
-        elseif c < ' ' || c == '\u85' || c == ' ' || c == ' '
+        elseif c < ' ' || c == '\u85' || c == '\u2028' || c == '\u2029'
             print(io, "\\u", string(UInt32(c), base = 16, pad = 4))
         else
             print(io, c)
@@ -89,7 +89,7 @@ function write_json(io::IO, value::List, depth)
 end
 
 write_json(io::IO, value, depth) = cannot_send("$(typeof(value)) is not a dictionary, vector, string, number, boolean or date. " *
-    "Convert it first, for example with string(value).")
+    "Convert it first, for example with string(value) or collect(value).")
 
 """
     Kestra.format(map) -> String
@@ -196,8 +196,9 @@ function timer(f::Function, name, tags = nothing)
 end
 
 function text(value)
+    # sprint, not string: string can be overloaded to return something that then fails to print.
     try
-        string(value)
+        sprint(print, value)
     catch
         "[FAILED string()]"
     end
@@ -206,9 +207,10 @@ end
 function exception_text(value)
     try
         value isa Tuple{Exception,Any} ? sprint(showerror, value[1], value[2]) :
-            value isa Exception ? sprint(showerror, value) : string(value)
+            value isa Exception ? sprint(showerror, value) : text(value)
     catch
-        "[FAILED showerror()]"
+        # showerror(io, e, nothing) throws, so retry without the backtrace.
+        value isa Tuple{Exception,Any} ? exception_text(value[1]) : "[FAILED showerror()]"
     end
 end
 
@@ -335,8 +337,9 @@ end
 
 function parse_hex4(p::Parser)
     p.i + 3 <= length(p.bytes) || parse_fail(p)
-    code = tryparse(UInt16, String(p.bytes[p.i:p.i+3]), base = 16)
-    code === nothing && parse_fail(p)
+    # tryparse alone would accept spaces around the digits.
+    all(b -> b in codeunits("0123456789abcdefABCDEF"), view(p.bytes, p.i:p.i+3)) || parse_fail(p)
+    code = parse(UInt16, String(p.bytes[p.i:p.i+3]), base = 16)
     p.i += 4
     code
 end
@@ -384,7 +387,8 @@ function parse_number(p::Parser)
     end
     text = String(p.bytes[start:p.i-1])
     occursin(r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$", text) || (p.i = start; parse_fail(p))
-    occursin(r"[.eE]", text) && return parse(Float64, text)
+    # Valid JSON past the double range reads as Inf, as in Python, instead of failing to parse.
+    occursin(r"[.eE]", text) && return something(tryparse(Float64, text), Float64(parse(BigFloat, text)))
     something(tryparse(Int64, text), parse(BigInt, text))
 end
 

@@ -16,12 +16,15 @@ end
 
 struct Unprintable end
 Base.show(::IO, ::Unprintable) = error("boom")
+# string() overloaded to return a value that then fails to print.
+struct Sneaky end
+Base.string(::Sneaky) = Unprintable()
 
 @enum Tier gold silver
 
 @testset "Kestra" begin
     @testset "a line escapes line terminators and keeps UTF-8" begin
-        line = Kestra.format(Dict("outputs" => Dict("v" => "a\nb\"\\ \x01 \u85     café")))
+        line = Kestra.format(Dict("outputs" => Dict("v" => "a\nb\"\\ \x01 \u85 \u2028 \u2029 café")))
         @test line == "::{\"outputs\":{\"v\":\"a\\nb\\\"\\\\ \\u0001 \\u0085 \\u2028 \\u2029 café\"}}::"
         @test !occursin('\n', line)
     end
@@ -85,13 +88,13 @@ Base.show(::IO, ::Unprintable) = error("boom")
             Kestra.timer("fetch", 3 // 2)
             Kestra.timer("fetch", Millisecond(1500))
         end
-        @test lines == "::{\"metrics\":[{\"name\":\"rows\",\"type\":\"counter\",\"value\":3,\"tags\":" *
-            lines[findfirst("\"tags\":", lines).stop+1:findfirst("}}]}::", lines).start] * "}]}::\n" *
-            "::{\"metrics\":[{\"name\":\"size\",\"type\":\"gauge\",\"value\":2.5,\"tags\":{\"7\":\"x\"}}]}::\n" *
+        first, rest = split(lines, '\n'; limit = 2)
+        m = match(r"^::\{\"metrics\":\[\{\"name\":\"rows\",\"type\":\"counter\",\"value\":3,\"tags\":\{(.*)\}\}\]\}::$", first)
+        # Dict order is not fixed, so compare the tags as a set.
+        @test m !== nothing && Set(split(m[1], ',')) ==
+            Set(["\"source\":\"shop\"", "\"retried\":\"false\"", "\"shard\":\"2\"", "\"day\":\"2026-01-02\""])
+        @test rest == "::{\"metrics\":[{\"name\":\"size\",\"type\":\"gauge\",\"value\":2.5,\"tags\":{\"7\":\"x\"}}]}::\n" *
             "::{\"metrics\":[{\"name\":\"fetch\",\"type\":\"timer\",\"value\":1.5,\"tags\":{}}]}::\n" ^ 2
-        for tag in ("\"source\":\"shop\"", "\"retried\":\"false\"", "\"shard\":\"2\"", "\"day\":\"2026-01-02\"")
-            @test occursin(tag, lines)
-        end
     end
 
     @testset "metrics refuse values Kestra would drop" begin
@@ -130,9 +133,11 @@ Base.show(::IO, ::Unprintable) = error("boom")
                 @logmsg Logging.Debug - 1 "t"
                 @debug "d"
                 @info "rows" n = 3 bad = Unprintable()
-                @warn "caf\xe9   two\nlines"
+                @warn "caf\xe9 \u2028 two\nlines"
                 @error "failed" exception = (ErrorException("boom"), backtrace())
                 @info Unprintable()
+                @info Sneaky() s = Sneaky()
+                @error "lost" exception = (ErrorException("boom"), nothing)
                 for _ in 1:3
                     @info "once" maxlog = 1
                 end
@@ -147,13 +152,15 @@ Base.show(::IO, ::Unprintable) = error("boom")
         ]
         @test startswith(logs[5], "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"failed\\nboom\\nStacktrace:")
         @test logs[6] == "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"[FAILED string()]\"}]}::"
-        @test logs[7] == "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"once\"}]}::"
-        @test length(logs) == 7
+        @test logs[7] == "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"Sneaky() s=Sneaky()\"}]}::"
+        @test logs[8] == "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"lost\\nboom\"}]}::"
+        @test logs[9] == "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"once\"}]}::"
+        @test length(logs) == 9
     end
 
     @testset "context" begin
         json = "{\"labels\":{\"team\":\"caf\\u00e9\",\"emoji\":\"\\ud83d\\ude00\"},\"inputs\":{\"text\":\"a\\nb\",\"list\":[1,null,2.5,true]}," *
-            "\"vars\":{\"n\":-42,\"e\":1.5e3,\"big\":123456789012345678901234567890,\"empty\":{}}}"
+            "\"vars\":{\"n\":-42,\"e\":1.5e3,\"huge\":1e400,\"big\":123456789012345678901234567890,\"empty\":{}}}"
         reset() = (Kestra.CONTEXT_JSON[] = nothing)
         clean = ("KESTRA_CONTEXT" => nothing, "KESTRA_EXECUTION_CONTEXT_FILE" => nothing)
         in_dir(f, files...) = mktempdir() do dir
@@ -172,7 +179,7 @@ Base.show(::IO, ::Unprintable) = error("boom")
                 context = Kestra.context()
                 @test context["labels"]["team"] == "café" && context["labels"]["emoji"] == "😀"
                 @test context["inputs"]["list"] == Any[1, nothing, 2.5, true]
-                @test context["vars"]["n"] === -42 && context["vars"]["e"] === 1500.0
+                @test context["vars"]["n"] === -42 && context["vars"]["e"] === 1500.0 && context["vars"]["huge"] === Inf
                 @test context["vars"]["big"] == big"123456789012345678901234567890"
                 rm(Kestra.CONTEXT_FILE)
                 context["labels"] = Dict()
@@ -230,6 +237,7 @@ Base.show(::IO, ::Unprintable) = error("boom")
                 ("{\"a\":1} x", "The execution context in .kestra-execution-context.json is not valid JSON: it fails at byte 9."),
                 ("{\"a\":01}", "The execution context in .kestra-execution-context.json is not valid JSON: it fails at byte 6."),
                 ("\xff", "The execution context in .kestra-execution-context.json is not valid JSON: it is not valid UTF-8."),
+                ("{\"a\":\"\\u 41 \"}", "The execution context in .kestra-execution-context.json is not valid JSON: it fails at byte 9."),
             ]
                 in_dir(Kestra.CONTEXT_FILE => content) do
                     e = errorof(Kestra.context)
