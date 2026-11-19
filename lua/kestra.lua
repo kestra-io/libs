@@ -14,6 +14,13 @@ local function fail(message)
   error(message, 0)
 end
 
+-- tostring can raise, or return a non-string on Lua 5.1, from a __tostring metamethod.
+local function safe_tostring(value)
+  local ok, text = pcall(tostring, value)
+  if ok and type(text) == 'string' then return text end
+  return '<' .. type(value) .. '>'
+end
+
 local function is_integer(value)
   if math.type then return math.type(value) == 'integer' end
   return value == math.floor(value) and value > -2 ^ 53 and value < 2 ^ 53
@@ -175,7 +182,12 @@ end
 
 -- Marks t, or a new empty table, to be sent as a JSON array, since an empty table is sent as {}.
 function kestra.array(t)
-  return setmetatable(t or {}, ARRAY)
+  t = t or {}
+  local metatable = getmetatable(t)
+  if metatable ~= nil and metatable ~= ARRAY then
+    fail('kestra.array takes a plain table, and this one has a metatable. Copy its values into a new table first.')
+  end
+  return setmetatable(t, ARRAY)
 end
 
 function kestra.outputs(outputs)
@@ -194,7 +206,7 @@ function kestra.assets(assets)
   local copy = {}
   for key, value in next, assets do
     if key ~= 'inputs' and key ~= 'outputs' then
-      fail("Assets hold only inputs and outputs, not '" .. tostring(key) .. "'.")
+      fail("Assets hold only inputs and outputs, not '" .. safe_tostring(key) .. "'.")
     end
     -- Kestra reads inputs and outputs as lists, and an empty table would be sent as {}.
     if type(value) == 'table' and next(value) == nil then
@@ -253,8 +265,14 @@ local function now()
 end
 
 -- Pass seconds, or a function that is timed and whose results are returned. No metric is sent if it fails.
+local function is_callable(value)
+  if type(value) == 'function' then return true end
+  local metatable = getmetatable(value)
+  return type(metatable) == 'table' and metatable.__call ~= nil
+end
+
 function kestra.timer(name, seconds_or_function, tags)
-  if type(seconds_or_function) ~= 'function' then
+  if not is_callable(seconds_or_function) then
     send_metric(name, 'timer', seconds_or_function, tags)
     return
   end
@@ -268,19 +286,13 @@ end
 -- LuaLogging method names, mapped to Kestra levels.
 local LEVELS = { trace = 'TRACE', debug = 'DEBUG', info = 'INFO', warn = 'WARN', error = 'ERROR', fatal = 'ERROR' }
 
--- tostring can raise, or return a non-string on Lua 5.1, from a __tostring metamethod.
-local function safe_tostring(value)
-  local ok, text = pcall(tostring, value)
-  if ok and type(text) == 'string' then return text end
-  return '<' .. type(value) .. '>'
-end
-
 local logger = {}
 for method, level in pairs(LEVELS) do
   -- Takes a message, or a string.format pattern and its values. Works called with : or with .
   logger[method] = function(...)
     local args = pack(...)
-    local first = args[1] == logger and 2 or 1
+    -- rawequal, as == would call a value's own __eq.
+    local first = rawequal(args[1], logger) and 2 or 1
     local message = safe_tostring(args[first])
     if args.n > first then
       -- Lua 5.1 formats only strings and numbers with %s.
@@ -288,13 +300,13 @@ for method, level in pairs(LEVELS) do
         local kind = type(args[i])
         if kind ~= 'string' and kind ~= 'number' then args[i] = safe_tostring(args[i]) end
       end
-      local ok, formatted = pcall(string.format, message, unpack(args, first + 1, args.n))
-      -- A pattern that does not match its values is logged as is, with the values after it, so a log call never fails.
-      if not ok then
-        for i = first + 1, args.n do args[i] = safe_tostring(args[i]) end
-        formatted = message .. ' ' .. table.concat(args, ' ', first + 1, args.n)
-      end
-      message = formatted
+      local _, conversions = (message:gsub('%%%%', '')):gsub('%%', '')
+      local ok, formatted = pcall(string.format, message, unpack(args, first + 1, math.min(args.n, first + conversions)))
+      -- string.format ignores extra values, and a pattern that does not match its values fails. Either way the values
+      -- it did not use follow the message, as in logger:error('failed:', err), so a log call never fails or drops one.
+      local rest = ok and first + conversions + 1 or first + 1
+      for i = rest, args.n do args[i] = safe_tostring(args[i]) end
+      message = (ok and formatted or message) .. (rest <= args.n and ' ' .. table.concat(args, ' ', rest, args.n) or '')
     end
     -- Invalid UTF-8 becomes U+FFFD.
     local text = string_json(message, true)
@@ -372,7 +384,8 @@ local function decode(json)
             pos = pos + 6
           end
         end
-        parts[#parts + 1] = utf8_char(code)
+        -- A lone surrogate cannot be written as UTF-8.
+        parts[#parts + 1] = utf8_char((code >= 0xD800 and code <= 0xDFFF) and 0xFFFD or code)
       else
         parts[#parts + 1] = DECODE_ESCAPES[escape] or invalid()
         pos = pos + 2
@@ -380,7 +393,8 @@ local function decode(json)
     end
   end
 
-  value = function()
+  value = function(depth)
+    if depth > MAX_DEPTH then invalid() end
     skip()
     local char = json:sub(pos, pos)
     if char == '{' then
@@ -395,7 +409,7 @@ local function decode(json)
         skip()
         if json:sub(pos, pos) ~= ':' then invalid() end
         pos = pos + 1
-        object[key] = value()
+        object[key] = value(depth + 1)
         skip()
         char = json:sub(pos, pos)
         pos = pos + 1
@@ -409,7 +423,7 @@ local function decode(json)
       if json:sub(pos, pos) == ']' then pos = pos + 1 return array end
       repeat
         count = count + 1
-        array[count] = value()
+        array[count] = value(depth + 1)
         skip()
         char = json:sub(pos, pos)
         pos = pos + 1
@@ -419,21 +433,21 @@ local function decode(json)
     elseif char == '"' then
       return read_string()
     end
-    for word, result in pairs({ ['true'] = true, ['false'] = false, null = 'null' }) do
-      if json:sub(pos, pos + #word - 1) == word then
-        pos = pos + #word
-        if result == 'null' then return nil end
-        return result
-      end
-    end
-    local number = json:match('^-?%d+%.?%d*[eE]?[-+]?%d*', pos)
-    if not number then invalid() end
+    if json:sub(pos, pos + 3) == 'true' then pos = pos + 4 return true end
+    if json:sub(pos, pos + 4) == 'false' then pos = pos + 5 return false end
+    if json:sub(pos, pos + 3) == 'null' then pos = pos + 4 return nil end
+    -- Strict JSON numbers: no leading zero, and digits after a dot or an exponent.
+    local number = json:match('^-?%d+', pos) or invalid()
+    if number:match('^-?0%d') then invalid() end
+    number = number .. (json:match('^%.%d+', pos + #number) or '')
+    number = number .. (json:match('^[eE][-+]?%d+', pos + #number) or '')
     pos = pos + #number
-    return tonumber(number) or invalid()
+    if json:find('^[.eE]', pos) then invalid() end
+    return tonumber(number)
   end
 
   local ok, result = pcall(function()
-    local decoded = value()
+    local decoded = value(0)
     skip()
     if pos <= #json then invalid() end
     return decoded
@@ -482,11 +496,14 @@ function kestra.context(path)
         .. 'variable is not set. The execution context is only available when the script runs inside a Kestra task.')
     end
   end
+  if not pcall(string_json, json, false) then
+    fail('The execution context in ' .. source .. ' is not valid JSON: it is not valid UTF-8.')
+  end
   local ok, context = decode(json)
   if not ok then
     fail('The execution context in ' .. source .. ' is not valid JSON: it fails at byte ' .. context .. '.')
   end
-  if type(context) ~= 'table' or json:match('^%s*(.)') ~= '{' then
+  if json:match('^%s*(.)') ~= '{' then
     fail('The execution context in ' .. source .. ' is not a JSON object.')
   end
   if path == nil then context_json = json end

@@ -138,11 +138,12 @@ test('metrics refuse values Kestra would drop', function()
 end)
 
 test('a timed function returns all its results, nil included', function()
-  local count, first, third
+  local count, first, second, third
   local line = capture(function()
     count = select('#', kestra.timer('t', function() return 1, nil, 3 end))
-    first, _, third = kestra.timer('t', function() return 1, nil, 3 end)
+    first, second, third = kestra.timer('t', function() return 1, nil, 3 end)
   end)
+  eq(second, nil)
   eq(count, 3)
   eq(first, 1)
   eq(third, 3)
@@ -164,6 +165,9 @@ test('logger levels, format values and both call styles', function()
     kestra.logger.info('dot call')
     kestra.logger:warn('100%')
     kestra.logger:info('%d rows', 'many')
+    kestra.logger:error('failed:', 'disk full', 3)
+    kestra.logger:info('%d of %d', 1, 2, 'extra')
+    kestra.logger.info(setmetatable({}, { __eq = function() error('eq') end, __tostring = function() return 'eq-safe' end }))
     kestra.logger:error(nil)
     kestra.logger:fatal('caf\233 \226\128\168')
   end)
@@ -172,6 +176,9 @@ test('logger levels, format values and both call styles', function()
     .. '::{"logs":[{"level":"INFO","message":"dot call"}]}::\n'
     .. '::{"logs":[{"level":"WARN","message":"100%"}]}::\n'
     .. '::{"logs":[{"level":"INFO","message":"%d rows many"}]}::\n'
+    .. '::{"logs":[{"level":"ERROR","message":"failed: disk full 3"}]}::\n'
+    .. '::{"logs":[{"level":"INFO","message":"1 of 2 extra"}]}::\n'
+    .. '::{"logs":[{"level":"INFO","message":"eq-safe"}]}::\n'
     .. '::{"logs":[{"level":"ERROR","message":"nil"}]}::\n'
     .. '::{"logs":[{"level":"ERROR","message":"caf\239\191\189 \\u2028"}]}::\n')
 end)
@@ -187,12 +194,30 @@ test('assets need inputs and outputs as lists, and no other keys', function()
   eq(error_of(function() kestra.assets({ outputs = { id = 'a', type = 'TABLE' } }) end),
     "Asset outputs must be a list, for example { { id = 'sales.orders', type = 'TABLE' } }.")
   eq(error_of(function() kestra.assets({ foo = 1 }) end), "Assets hold only inputs and outputs, not 'foo'.")
+  local key = setmetatable({}, { __tostring = function() error('boom') end })
+  eq(error_of(function() kestra.assets({ [key] = {} }) end), "Assets hold only inputs and outputs, not '<table>'.")
+end)
+
+test('a callable table is timed like a function', function()
+  local result
+  local line = capture(function()
+    result = kestra.timer('t', setmetatable({}, { __call = function() return 7 end }))
+  end)
+  eq(result, 7)
+  assert(line:match('"name":"t"'), line)
+end)
+
+test('kestra.array refuses a table that already has a metatable', function()
+  local object = setmetatable({}, { __index = { hello = true } })
+  eq(error_of(function() kestra.array(object) end),
+    'kestra.array takes a plain table, and this one has a metatable. Copy its values into a new table first.')
+  eq(object.hello, true)
 end)
 
 test('a log call never fails on a __tostring that raises or returns a non-string', function()
   local raises = setmetatable({}, { __tostring = function() error('boom') end })
   local number = setmetatable({}, { __tostring = function() return 1 end })
-  -- Lua 5.4 turns the returned number into text, older versions do not.
+  -- Lua 5.2 and later turn the returned number into text, 5.1 and LuaJIT do not.
   local ok, text = pcall(tostring, number)
   local number_message = ok and type(text) == 'string' and text or '<table>'
   eq(capture(function()
@@ -288,13 +313,20 @@ test('content that is not a JSON object names its source', function()
     end)
   end
   os.remove(DEFAULT_FILE)
-  for json, byte in pairs({ ['{oops'] = 2, ['{"a":1} x'] = 9, ['{"a":"\\x"}'] = 7, [''] = 1, ['{"a":'] = 6 }) do
+  for json, byte in pairs({ ['{oops'] = 2, ['{"a":1} x'] = 9, ['{"a":"\\x"}'] = 7, [''] = 1, ['{"a":'] = 6, ['{"a":01}'] = 6,
+    ['{"a":1.}'] = 7, [string.rep('[', 600)] = 514 }) do
     write_file(DEFAULT_FILE, json)
     with_env({}, function()
       eq(error_of(function() fresh().context() end),
         'The execution context in .kestra-execution-context.json is not valid JSON: it fails at byte ' .. byte .. '.')
     end)
   end
+  write_file(DEFAULT_FILE, '{"a":"caf\233"}')
+  with_env({}, function()
+    eq(error_of(function() fresh().context() end), 'The execution context in .kestra-execution-context.json is not valid JSON: it is not valid UTF-8.')
+  end)
+  write_file(DEFAULT_FILE, '{"a":"x\\ud800y"}')
+  with_env({}, function() eq(fresh().context().a, 'x\239\191\189y') end)
   os.remove(DEFAULT_FILE)
   with_env({ KESTRA_CONTEXT = '{"a":1}' }, function()
     eq(error_of(function() fresh().context() end), 'The KESTRA_CONTEXT environment variable is not valid base64.')
@@ -314,6 +346,8 @@ end)
 
 for _, t in ipairs(tests) do
   local ok, err = pcall(t.body)
+  -- A failed assertion leaves its context file behind, which would fail the next tests too.
+  os.remove(DEFAULT_FILE)
   if ok then
     print('ok - ' .. t.name)
   else
