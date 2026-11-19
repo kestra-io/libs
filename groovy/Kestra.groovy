@@ -1,14 +1,27 @@
 import groovy.json.JsonException
+import groovy.json.JsonLexer
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurperClassic
+import groovy.json.JsonToken
 
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.nio.file.AccessDeniedException
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.time.Duration
+import java.time.Instant
 import java.time.temporal.TemporalAccessor
 import java.time.temporal.TemporalAmount
+
+import static groovy.json.JsonTokenType.CLOSE_BRACKET
+import static groovy.json.JsonTokenType.CLOSE_CURLY
+import static groovy.json.JsonTokenType.OPEN_BRACKET
+import static groovy.json.JsonTokenType.OPEN_CURLY
 
 /**
  * Sends outputs, metrics, logs and assets from Groovy script tasks to Kestra, and reads the execution context.
@@ -16,11 +29,15 @@ import java.time.temporal.TemporalAmount
  */
 class Kestra {
     static final String CONTEXT_FILE = '.kestra-execution-context.json'
+    private static final int MAX_DEPTH = 512
     private static final Logger LOGGER = new Logger()
     private static String contextJson
 
     /** Returns the `::{...}::` line for a map, without sending it. */
-    static String format(Map map) {
+    static String format(Object map) {
+        if (!(map instanceof Map)) {
+            throw new IllegalArgumentException('Kestra lines hold a map, for example Kestra.format(outputs: [rows: 42]).')
+        }
         Object prepared
         try {
             prepared = prepare(map)
@@ -32,8 +49,8 @@ class Kestra {
     }
 
     /** An empty map sends nothing, as in Python, so outputs built in a loop over no rows do not fail the task. */
-    static void outputs(Map outputs) {
-        if (outputs == null) {
+    static void outputs(Object outputs) {
+        if (!(outputs instanceof Map)) {
             throw new IllegalArgumentException('Outputs must be a map, for example Kestra.outputs(rows: 42).')
         }
         if (outputs) {
@@ -42,12 +59,13 @@ class Kestra {
     }
 
     /** Takes inputs and outputs lists. An empty map sends nothing. */
-    static void assets(Map assets) {
-        if (assets == null) {
+    static void assets(Object assets) {
+        if (!(assets instanceof Map)) {
             throw new IllegalArgumentException("Assets must be a map, for example Kestra.assets(outputs: [[id: 'sales.orders', type: 'TABLE']]).")
         }
-        assets.each { key, value ->
-            if (!(key in ['inputs', 'outputs'])) {
+        ((Map) assets).each { key, value ->
+            // String.valueOf, as a GString key never equals the String 'outputs'.
+            if (!(String.valueOf(key) in ['inputs', 'outputs'])) {
                 throw new IllegalArgumentException("Assets hold only inputs and outputs, not '$key'.")
             }
             if (!(value instanceof Iterable || value?.getClass()?.isArray())) {
@@ -59,18 +77,21 @@ class Kestra {
         }
     }
 
-    static void counter(String name, Object value, Map tags = [:]) { sendMetric(name, 'counter', value, tags) }
+    static void counter(String name, Object value, Object tags = [:]) { sendMetric(name, 'counter', value, tags) }
 
-    static void gauge(String name, Object value, Map tags = [:]) { sendMetric(name, 'gauge', value, tags) }
+    static void gauge(String name, Object value, Object tags = [:]) { sendMetric(name, 'gauge', value, tags) }
 
-    static void timer(String name, Number seconds, Map tags = [:]) { sendMetric(name, 'timer', seconds, tags) }
+    /** Sends a timer in seconds, or for a Duration such as Duration.between(start, Instant.now()). */
+    static void timer(String name, Object seconds, Object tags = [:]) {
+        sendMetric(name, 'timer', seconds instanceof Duration ? ((Duration) seconds).toNanos() / 1e9d : seconds, tags)
+    }
 
     // Groovy passes named arguments, as in counter('rows', 3, env: 'qa'), as a first Map.
     static void counter(Map tags, String name, Object value) { counter(name, value, tags) }
 
     static void gauge(Map tags, String name, Object value) { gauge(name, value, tags) }
 
-    static void timer(Map tags, String name, Number seconds) { timer(name, seconds, tags) }
+    static void timer(Map tags, String name, Object seconds) { timer(name, seconds, tags) }
 
     static <T> T timer(Map tags, String name, Closure<T> closure) { timer(name, tags, closure) }
 
@@ -89,7 +110,8 @@ class Kestra {
      * the task sets executionContext: true). Without a path, or with an empty one, falls back to the base64 KESTRA_CONTEXT
      * variable. The default context is read once, and each call returns a new map the caller may change.
      *
-     * @throws FileNotFoundException when no context is found, and the read error when the file cannot be read
+     * @throws FileNotFoundException when no context is found
+     * @throws IOException when the context file is a directory or cannot be read
      * @throws IllegalArgumentException when KESTRA_CONTEXT is not base64, or the context is not a JSON object
      */
     static Map<String, Object> context(String path = null) {
@@ -101,7 +123,7 @@ class Kestra {
             String encoded = (System.getenv('KESTRA_CONTEXT') ?: '').replaceAll(/\s/, '')
             source = file
             try {
-                json = new String(Files.readAllBytes(Paths.get(file)), StandardCharsets.UTF_8)
+                json = utf8(Files.readAllBytes(Paths.get(file)), file)
             } catch (NoSuchFileException ignored) {
                 if (isExplicit) {
                     throw new FileNotFoundException("Kestra execution context file '$file' does not exist.")
@@ -110,19 +132,23 @@ class Kestra {
                     throw new FileNotFoundException("No Kestra execution context found: '$file' does not exist and the KESTRA_CONTEXT " +
                         'environment variable is not set. The execution context is only available when the script runs inside a Kestra task.')
                 }
+                byte[] bytes
                 try {
-                    json = new String(Base64.decoder.decode(encoded), StandardCharsets.UTF_8)
+                    bytes = Base64.decoder.decode(encoded)
                 } catch (IllegalArgumentException e) {
                     throw new IllegalArgumentException('The KESTRA_CONTEXT environment variable is not valid base64.', e)
                 }
                 source = 'KESTRA_CONTEXT'
+                json = utf8(bytes, source)
             } catch (IOException e) {
                 // Only a missing file falls back. A directory or an unreadable file is a misconfiguration to report.
-                throw new IOException("Kestra execution context file '$file' cannot be read: ${e.class.simpleName} ${e.message}.", e)
+                String reason = e instanceof AccessDeniedException ? 'permission denied' : e.message
+                throw new IOException("Kestra execution context file '$file' cannot be read ($reason). Check the path and its permissions.", e)
             }
         }
         Object context
         try {
+            checkStructure(json)
             // The other JsonSlurper parsers overflow integers past Long silently.
             context = new JsonSlurperClassic().parseText(json)
         } catch (JsonException | IllegalArgumentException e) {
@@ -137,7 +163,36 @@ class Kestra {
         context as Map<String, Object>
     }
 
-    static void send(Map map) {
+    // JsonSlurper reads the first value and ignores what follows, and overflows the stack on deep nesting.
+    private static void checkStructure(String json) {
+        JsonLexer lexer = new JsonLexer(new StringReader(json))
+        int depth = 0
+        boolean isDone = false
+        for (JsonToken token = lexer.nextToken(); token != null; token = lexer.nextToken()) {
+            if (isDone) {
+                throw new JsonException("unexpected text after the JSON value at line ${token.startLine} column ${token.startColumn}.")
+            }
+            if (token.type == OPEN_CURLY || token.type == OPEN_BRACKET) {
+                if (++depth > MAX_DEPTH) {
+                    throw new JsonException('it is nested too deep.')
+                }
+            } else if (token.type == CLOSE_CURLY || token.type == CLOSE_BRACKET) {
+                depth--
+            }
+            isDone = depth == 0
+        }
+    }
+
+    private static String utf8(byte[] bytes, String source) {
+        try {
+            StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (CharacterCodingException e) {
+            throw new IllegalArgumentException("The execution context in $source is not valid JSON: it is not valid UTF-8.", e)
+        }
+    }
+
+    private static void send(Map map) {
         String line = format(map)
         // One write per line, flushed, so Kestra gets each line when it is written and not at exit.
         synchronized (System.out) {
@@ -146,25 +201,32 @@ class Kestra {
         }
     }
 
-    private static void sendMetric(String name, String type, Object value, Map tags) {
+    private static void sendMetric(String name, String type, Object value, Object tags) {
         if (!name) {
             throw new IllegalArgumentException('Metric name must be a non-empty string.')
         }
         if (!isFinite(value)) {
             throw new IllegalArgumentException("Metric '$name' value must be a finite number.")
         }
+        if (tags != null && !(tags instanceof Map)) {
+            throw new IllegalArgumentException("Metric '$name' tags must be a map, for example [env: 'prod'].")
+        }
         Map<String, String> stringTags = [:]
-        (prepare(tags ?: [:]) as Map).each { key, tag ->
-            if (tag == null || tag instanceof Map || tag instanceof List) {
-                throw new IllegalArgumentException("Metric '$name' tag '$key' must be a single value, for example [env: 'prod'].")
+        ((Map) tags ?: [:]).each { key, tag ->
+            String text = keyText(key)
+            if (stringTags.containsKey(text)) {
+                throw new IllegalArgumentException("Metric '$name' has two tags named '$text'.")
             }
-            // Kestra reads tags as a map of strings.
-            stringTags[key] = tag.toString()
+            if (tag == null || tag instanceof Map || tag instanceof Iterable || tag.getClass().isArray()) {
+                throw new IllegalArgumentException("Metric '$name' tag '$text' must be a single value, for example [env: 'prod'].")
+            }
+            // Kestra reads tags as a map of strings. Numbers keep their text, as str() does in Python.
+            stringTags[text] = tag instanceof Number ? tag.toString() : prepare(tag).toString()
         }
         send([metrics: [[name: name, type: type, value: value, tags: stringTags]]])
     }
 
-    // Kestra reads numbers as doubles, so a BigInteger or BigDecimal past the double range would read as Infinity.
+    // Kestra reads a metric value as a double, so a BigInteger or BigDecimal past the double range would read as Infinity.
     private static boolean isFinite(Object value) {
         if (!(value instanceof Number)) {
             return false
@@ -179,10 +241,17 @@ class Kestra {
         if (value == null || value instanceof Boolean || value instanceof String) {
             return value
         }
-        if (value instanceof Number) {
+        if (value instanceof Double || value instanceof Float) {
             if (!isFinite(value)) {
-                throw new IllegalArgumentException('This value cannot be sent to Kestra as JSON. Replace NaN and Infinity with null.')
+                throw new IllegalArgumentException('This value cannot be sent to Kestra as JSON: replace NaN and Infinity with null.')
             }
+            return value
+        }
+        // Kestra reads a decimal number as a double, while an integer of any size keeps its value, as in Python.
+        if (value instanceof BigDecimal && !isFinite(value)) {
+            throw new IllegalArgumentException('This value cannot be sent to Kestra as JSON: a number is past the double range and would read as Infinity.')
+        }
+        if (value instanceof Number) {
             return value
         }
         if (value instanceof CharSequence || value instanceof Character || value instanceof Enum || value instanceof TemporalAccessor
@@ -190,12 +259,13 @@ class Kestra {
             return value.toString()
         }
         if (value instanceof Date) {
-            return ((Date) value).toInstant().toString()
+            // Instant.ofEpochMilli, as java.sql.Date and java.sql.Time throw on toInstant().
+            return Instant.ofEpochMilli(((Date) value).time).toString()
         }
         if (value instanceof Map) {
             Map<String, Object> copy = [:]
             ((Map) value).each { key, item ->
-                String text = String.valueOf(key)
+                String text = keyText(key)
                 // 1 and '1', or a GString and an equal String, are distinct keys that read as the same JSON key.
                 if (copy.containsKey(text)) {
                     throw new IllegalArgumentException("This value cannot be sent to Kestra as JSON: two keys read as '$text'.")
@@ -213,6 +283,13 @@ class Kestra {
         }
         throw new IllegalArgumentException("This value cannot be sent to Kestra as JSON: ${value.getClass().name} is not a map, list, string, number, " +
             'boolean or date. Convert it first, for example with toString().')
+    }
+
+    private static String keyText(Object key) {
+        if (key == null || key instanceof CharSequence || key instanceof Number || key instanceof Boolean || key instanceof Character || key instanceof Enum) {
+            return String.valueOf(key)
+        }
+        throw new IllegalArgumentException("This value cannot be sent to Kestra as JSON: a key must be a string, number or boolean, not ${key.getClass().name}.")
     }
 
     /** SLF4J-style logger: `{}` placeholders, and a Throwable as the last argument is appended with its stack trace. Never throws on its values. */
@@ -256,8 +333,10 @@ class Kestra {
 
         private static String text(Object value) {
             try {
-                return String.valueOf(value)
-            } catch (Exception ignored) {
+                // A toString() can return null, and lists that contain each other overflow the stack.
+                String text = String.valueOf(value)
+                return text == null ? 'null' : text
+            } catch (Exception | StackOverflowError ignored) {
                 return '[FAILED toString()]'
             }
         }

@@ -77,8 +77,10 @@ test('outputs refuse values Kestra cannot read') {
     Map loop = [:]
     loop.self = loop
     [
-        [[v: Double.NaN], 'Replace NaN and Infinity with null'],
-        [[v: Float.POSITIVE_INFINITY], 'Replace NaN and Infinity with null'],
+        [[v: Double.NaN], 'replace NaN and Infinity with null'],
+        [[v: Float.POSITIVE_INFINITY], 'replace NaN and Infinity with null'],
+        [[v: 1E+400G], 'past the double range'],
+        [[(new Object()): 1], 'a key must be a string, number or boolean, not java.lang.Object'],
         [[v: new Object()], 'java.lang.Object is not a map, list, string, number, boolean or date'],
         [[v: String], 'java.lang.Class is not a map'],
         [[v: { 1 }], 'is not a map, list, string, number, boolean or date'],
@@ -90,6 +92,11 @@ test('outputs refuse values Kestra cannot read') {
         assert error instanceof IllegalArgumentException && error.message.contains(message)
     }
     assert errorOf { Kestra.outputs(null) }.message == 'Outputs must be a map, for example Kestra.outputs(rows: 42).'
+    assert errorOf { Kestra.outputs([1, 2]) }.message == 'Outputs must be a map, for example Kestra.outputs(rows: 42).'
+    assert errorOf { Kestra.format([1]) }.message.startsWith('Kestra lines hold a map')
+    // An integer of any size keeps its value, as in Python, and a database row with java.sql dates is sent.
+    assert capture { Kestra.outputs(n: 2G**70, day: new java.sql.Date(0), at: new java.sql.Time(0)) } ==
+        '::{"outputs":{"n":1180591620717411303424,"day":"1970-01-01T00:00:00Z","at":"1970-01-01T00:00:00Z"}}::\n'
     assert capture { Kestra.outputs([:]); Kestra.assets([:]) } == ''
     assert capture { errorOf { Kestra.outputs(v: Double.NaN) } } == ''
 }
@@ -100,11 +107,13 @@ test('metrics send numbers and string tags, and empty tags as {}') {
         Kestra.gauge('size', 2.5G)
         Kestra.timer('fetch', 1.25)
         Kestra.counter('rows', 1, env: 'qa', day: java.time.LocalDate.of(2026, 1, 2))
+        Kestra.timer('fetch', java.time.Duration.ofMillis(1500), [ratio: Double.NaN])
     }
     assert lines == '::{"metrics":[{"name":"rows","type":"counter","value":3,"tags":{"source":"shop","retried":"false","shard":"2","1":"x"}}]}::\n' +
         '::{"metrics":[{"name":"size","type":"gauge","value":2.5,"tags":{}}]}::\n' +
         '::{"metrics":[{"name":"fetch","type":"timer","value":1.25,"tags":{}}]}::\n' +
-        '::{"metrics":[{"name":"rows","type":"counter","value":1,"tags":{"env":"qa","day":"2026-01-02"}}]}::\n'
+        '::{"metrics":[{"name":"rows","type":"counter","value":1,"tags":{"env":"qa","day":"2026-01-02"}}]}::\n' +
+        '::{"metrics":[{"name":"fetch","type":"timer","value":1.5,"tags":{"ratio":"NaN"}}]}::\n'
 }
 
 test('metrics refuse values Kestra would drop') {
@@ -114,7 +123,9 @@ test('metrics refuse values Kestra would drop') {
     }
     assert errorOf { Kestra.counter('rows', 1, [env: ['a']]) }.message == "Metric 'rows' tag 'env' must be a single value, for example [env: 'prod']."
     assert errorOf { Kestra.counter('rows', 1, [env: null]) }.message == "Metric 'rows' tag 'env' must be a single value, for example [env: 'prod']."
-    assert errorOf { Kestra.counter('rows', 1, [(1): 'a', '1': 'b']) }.message == "This value cannot be sent to Kestra as JSON: two keys read as '1'."
+    assert errorOf { Kestra.counter('rows', 1, [(1): 'a', '1': 'b']) }.message == "Metric 'rows' has two tags named '1'."
+    assert errorOf { Kestra.counter('rows', 1, 'prod') }.message == "Metric 'rows' tags must be a map, for example [env: 'prod']."
+    ['3', true].each { value -> assert errorOf { Kestra.timer('t', value) }.message == "Metric 't' value must be a finite number." }
     [2G ** 2000, new BigDecimal('1E+400')].each { value ->
         assert errorOf { Kestra.gauge('size', value) }.message == "Metric 'size' value must be a finite number."
     }
@@ -138,6 +149,11 @@ test('logger levels, placeholders and a trailing exception') {
         Kestra.logger.error('failed {}', 'x', new IllegalStateException('boom'))
         Kestra.logger.info('a {} {}', new Object() { String toString() { throw new IllegalStateException('bad') } })
         Kestra.logger.warn('b {}', new IllegalStateException('consumed'))
+        List a = []
+        List b = [a]
+        a << b
+        Kestra.logger.info('c {}', a)
+        Kestra.logger.info(new Object() { String toString() { null } })
     }
     List<String> rows = lines.readLines()
     assert rows[0..3] == [
@@ -148,7 +164,9 @@ test('logger levels, placeholders and a trailing exception') {
     ]
     assert rows[5] == '::{"logs":[{"level":"INFO","message":"a [FAILED toString()] {}"}]}::'
     assert rows[6].startsWith('::{"logs":[{"level":"WARN","message":"b {}\\njava.lang.IllegalStateException: consumed\\n\\tat ')
-    assert rows.size() == 7 && rows[4].startsWith('::{"logs":[{"level":"ERROR","message":"failed x\\njava.lang.IllegalStateException: boom\\n\\tat ')
+    assert rows[7] == '::{"logs":[{"level":"INFO","message":"c [FAILED toString()]"}]}::'
+    assert rows[8] == '::{"logs":[{"level":"INFO","message":"null"}]}::'
+    assert rows.size() == 9 && rows[4].startsWith('::{"logs":[{"level":"ERROR","message":"failed x\\njava.lang.IllegalStateException: boom\\n\\tat ')
 }
 
 test('assets keep empty lists and empty metadata') {
@@ -157,6 +175,8 @@ test('assets keep empty lists and empty metadata') {
 }
 
 test('assets need inputs and outputs as lists, and no other keys') {
+    String key = 'outputs'
+    assert capture { Kestra.assets(["$key": []]) } == '::{"assets":{"outputs":[]}}::\n'
     assert errorOf { Kestra.assets(outputs: [id: 'a', type: 'TABLE']) }.message ==
         "Asset outputs must be a list, for example [[id: 'sales.orders', type: 'TABLE']]."
     assert errorOf { Kestra.assets(foo: 1) }.message == "Assets hold only inputs and outputs, not 'foo'."
@@ -200,11 +220,15 @@ test('context errors name their cause') {
     File dir = tempDir()
     write(dir, Kestra.CONTEXT_FILE, '[1, 2]')
     assert run(dir, [:], print) == 'IllegalArgumentException: The execution context in .kestra-execution-context.json is not a JSON object.'
-    write(dir, Kestra.CONTEXT_FILE, '{"a":')
-    assert run(dir, [:], print).startsWith('IllegalArgumentException: The execution context in .kestra-execution-context.json is not valid JSON: ')
+    ['{"a":', '{"a":1} x', '{"a":1}}', '[' * 600].each { json ->
+        write(dir, Kestra.CONTEXT_FILE, json)
+        assert run(dir, [:], print).startsWith('IllegalArgumentException: The execution context in .kestra-execution-context.json is not valid JSON: ')
+    }
+    new File(dir, Kestra.CONTEXT_FILE).bytes = [0x7b, 0x22, 0x61, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d] as byte[]
+    assert run(dir, [:], print) == 'IllegalArgumentException: The execution context in .kestra-execution-context.json is not valid JSON: it is not valid UTF-8.'
     assert run(tempDir(), [KESTRA_CONTEXT: '{"a":1}'], print) == 'IllegalArgumentException: The KESTRA_CONTEXT environment variable is not valid base64.'
     assert run(tempDir(), [KESTRA_CONTEXT: base64('[]')], print) == 'IllegalArgumentException: The execution context in KESTRA_CONTEXT is not a JSON object.'
-    assert run(tempDir(), [KESTRA_EXECUTION_CONTEXT_FILE: tempDir().path, KESTRA_CONTEXT: base64('{"a":1}')], print).startsWith("IOException: Kestra execution context file '/tmp/kestra-ctx-")
+    assert run(tempDir(), [KESTRA_EXECUTION_CONTEXT_FILE: tempDir().path, KESTRA_CONTEXT: base64('{"a":1}')], print).endsWith('cannot be read (Is a directory). Check the path and its permissions.')
     assert run(tempDir(), [:], print) == "FileNotFoundException: No Kestra execution context found: '.kestra-execution-context.json' does not exist " +
         'and the KESTRA_CONTEXT environment variable is not set. The execution context is only available when the script runs inside a Kestra task.'
 }
