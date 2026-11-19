@@ -281,6 +281,28 @@ jobs:
       - name: Test
         run: prove -lv t
 
+  groovy:
+    name: Test Groovy class (${{ matrix.groovy }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        groovy: ['3.0-jdk11', 'latest']
+    container:
+      image: groovy:${{ matrix.groovy }}
+      # The image runs as the groovy user, which cannot write the checkout.
+      options: --user root
+    defaults:
+      run:
+        working-directory: groovy
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        run: groovy test/KestraTest.groovy
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -294,6 +316,7 @@ jobs:
       - ruby
       - php
       - perl
+      - groovy
     steps:
       - name: Create Release
         uses: actions/create-release@v1
