@@ -31,18 +31,32 @@ class Kestra {
         '::' + JsonOutput.toJson(prepared) + '::'
     }
 
+    /** An empty map sends nothing, as in Python, so outputs built in a loop over no rows do not fail the task. */
     static void outputs(Map outputs) {
-        if (!outputs) {
-            throw new IllegalArgumentException('Outputs must be a non-empty map, for example Kestra.outputs(rows: 42).')
+        if (outputs == null) {
+            throw new IllegalArgumentException('Outputs must be a map, for example Kestra.outputs(rows: 42).')
         }
-        send([outputs: outputs])
+        if (outputs) {
+            send([outputs: outputs])
+        }
     }
 
+    /** Takes inputs and outputs lists. An empty map sends nothing. */
     static void assets(Map assets) {
-        if (!assets) {
-            throw new IllegalArgumentException("Assets must be a non-empty map, for example Kestra.assets(outputs: [[id: 'sales.orders', type: 'TABLE']]).")
+        if (assets == null) {
+            throw new IllegalArgumentException("Assets must be a map, for example Kestra.assets(outputs: [[id: 'sales.orders', type: 'TABLE']]).")
         }
-        send([assets: assets])
+        assets.each { key, value ->
+            if (!(key in ['inputs', 'outputs'])) {
+                throw new IllegalArgumentException("Assets hold only inputs and outputs, not '$key'.")
+            }
+            if (!(value instanceof Iterable || value?.getClass()?.isArray())) {
+                throw new IllegalArgumentException("Asset $key must be a list, for example [[id: 'sales.orders', type: 'TABLE']].")
+            }
+        }
+        if (assets) {
+            send([assets: assets])
+        }
     }
 
     static void counter(String name, Object value, Map tags = [:]) { sendMetric(name, 'counter', value, tags) }

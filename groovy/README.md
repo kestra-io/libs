@@ -37,8 +37,8 @@ tasks:
 
 | Call | Result in Kestra |
 |------|------------------|
-| `Kestra.outputs(Map outputs)` | Task outputs under `outputs.<task>.vars` |
-| `Kestra.assets(inputs: [...], outputs: [...])` | Input and output assets of the task |
+| `Kestra.outputs(Map outputs)` | Task outputs under `outputs.<task>.vars`. An empty map sends nothing |
+| `Kestra.assets(inputs: [...], outputs: [...])` | Input and output assets of the task, as lists. An empty map sends nothing |
 | `Kestra.counter(name, value, tags = [:])` or `Kestra.counter(name, value, env: 'qa')` | Counter metric |
 | `Kestra.gauge(name, value, tags = [:])` | Gauge metric |
 | `Kestra.timer(name, seconds, tags = [:])` or `Kestra.timer(name, tags = [:]) { ... }` | Timer metric. A closure is timed and its result returned |

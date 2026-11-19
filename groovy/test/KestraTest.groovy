@@ -89,7 +89,8 @@ test('outputs refuse values Kestra cannot read') {
         Throwable error = errorOf { Kestra.outputs(value) }
         assert error instanceof IllegalArgumentException && error.message.contains(message)
     }
-    assert errorOf { Kestra.outputs([:]) }.message == 'Outputs must be a non-empty map, for example Kestra.outputs(rows: 42).'
+    assert errorOf { Kestra.outputs(null) }.message == 'Outputs must be a map, for example Kestra.outputs(rows: 42).'
+    assert capture { Kestra.outputs([:]); Kestra.assets([:]) } == ''
     assert capture { errorOf { Kestra.outputs(v: Double.NaN) } } == ''
 }
 
@@ -153,6 +154,12 @@ test('logger levels, placeholders and a trailing exception') {
 test('assets keep empty lists and empty metadata') {
     String line = capture { Kestra.assets(inputs: [], outputs: [[id: 'sales.orders', type: 'TABLE', metadata: [:]]]) }
     assert line == '::{"assets":{"inputs":[],"outputs":[{"id":"sales.orders","type":"TABLE","metadata":{}}]}}::\n'
+}
+
+test('assets need inputs and outputs as lists, and no other keys') {
+    assert errorOf { Kestra.assets(outputs: [id: 'a', type: 'TABLE']) }.message ==
+        "Asset outputs must be a list, for example [[id: 'sales.orders', type: 'TABLE']]."
+    assert errorOf { Kestra.assets(foo: 1) }.message == "Assets hold only inputs and outputs, not 'foo'."
 }
 
 String CONTEXT = '{"labels":{"team":"caf\\u00e9"},"inputs":{"rows":42,"list":[1,null],"big":12345678901234567890},"execution":{"id":"default"}}'
