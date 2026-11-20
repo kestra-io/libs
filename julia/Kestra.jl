@@ -145,10 +145,8 @@ end
 assets(; kwargs...) = assets(values(kwargs))
 assets(_) = throw(ArgumentError("Assets must be a dictionary or a named tuple, for example Kestra.assets(outputs = [(id = \"sales.orders\", type = \"TABLE\")])."))
 
-function send_metric(name, type, value, tags)
+function metric_tags(name, tags)
     name isa AbstractString && !isempty(name) || throw(ArgumentError("Metric name must be a non-empty string."))
-    # Kestra reads the value as a double, so a BigInt past the double range would read as Infinity.
-    value isa Real && !(value isa Bool) && isfinite(Float64(value)) || throw(ArgumentError("Metric '$name' value must be a finite number."))
     tags === nothing || tags isa Map || throw(ArgumentError("Metric '$name' tags must be a dictionary or a named tuple, for example (env = \"prod\",)."))
     string_tags = Dict{String,String}()
     for (key, tag) in pairs(something(tags, NamedTuple()))
@@ -160,6 +158,13 @@ function send_metric(name, type, value, tags)
         # Kestra reads tags as a map of strings.
         string_tags[text] = sprint(print, tag)
     end
+    string_tags
+end
+
+function send_metric(name, type, value, tags)
+    string_tags = metric_tags(name, tags)
+    # Kestra reads the value as a double, so a BigInt past the double range would read as Infinity.
+    value isa Real && !(value isa Bool) && isfinite(Float64(value)) || throw(ArgumentError("Metric '$name' value must be a finite number."))
     send(Dict("metrics" => [(name = name, type = type, value = value, tags = string_tags)]))
 end
 
@@ -191,6 +196,8 @@ timer(name, ::Union{Period,Dates.CompoundPeriod}, tags = nothing) =
 # Python's order, timer(name, f), as well as the do-block order.
 timer(name, f::Function, tags = nothing) = timer(f, name, tags)
 function timer(f::Function, name, tags = nothing)
+    # Checked first, so a bad name or tag does not fail after f has done its work.
+    metric_tags(name, tags)
     start = time_ns()
     result = f()
     send_metric(name, "timer", (time_ns() - start) / 1e9, tags)

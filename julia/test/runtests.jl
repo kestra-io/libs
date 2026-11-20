@@ -121,6 +121,9 @@ Base.string(::Sneaky) = Unprintable()
         m = match(r"^::\{\"metrics\":\[\{\"name\":\"fetch\",\"type\":\"timer\",\"value\":([0-9.e-]+),\"tags\":\{\"env\":\"qa\"\}\}\]\}::\n$", line)
         @test m !== nothing && parse(Float64, m[1]) > 0
         @test capture(() -> @test_throws ErrorException Kestra.timer(() -> error("boom"), "fetch")) == ""
+        is_run = Ref(false)
+        @test_throws ArgumentError Kestra.timer(() -> is_run[] = true, "fetch", (env = [1],))
+        @test !is_run[]
         @test capture(() -> @test(Kestra.timer("fetch", () -> 7) == 7)) != ""
         @test_throws ArgumentError Kestra.timer("fetch", Dates.Month(1))
         @test_throws ArgumentError Kestra.timer("fetch", Dates.canonicalize(Millisecond(90_000)))
