@@ -27,9 +27,20 @@ Read `path` (empty counts as unset), then `KESTRA_EXECUTION_CONTEXT_FILE` (empty
 - Write UTF-8 bytes, or escape non-ASCII, so the console code page cannot change the text (Windows PowerShell).
 - Never send a value Kestra cannot read: validate input first and fail with a plain sentence that says what to pass.
 
+## Values
+
+- Empty outputs or assets send nothing and do not fail, as in Python.
+- Asset `inputs` and `outputs` are lists. Any other key fails.
+- NaN and Infinity fail with a plain sentence, never sent as `null`. A value the library cannot send fails with a plain sentence, not the serializer's error. Dates are sent as ISO text, and a SQL DATE or TIME keeps its local value.
+- Two keys that read as the same JSON key, such as `1` and `"1"`, fail instead of one value being lost. The same goes for tag names.
+- Tag values are single values sent as strings: booleans as `true` and `false`, numbers as their text.
+- A timer that takes a function checks the name and tags before running it, returns the function's result, and sends nothing if it throws.
+- A log call never fails or hangs: not on a value whose string conversion throws, not on a value that contains itself. A lazy or single-pass sequence is never enumerated, and a library that expands collections itself shows at most 1000 items.
+- A released library never changes the line a working call sends, and never starts failing a call that works. Python and JavaScript keep `"True"` tags, `null` for NaN, duplicate keys, unchecked assets and the JavaScript line for empty outputs for that reason. Fix only what fails or sends a line Kestra drops.
+
 ## Code
 
 - The features above need no dependency beyond the standard library, plus a JSON package where the language has none built in (`jsonlite` for R).
-- Write each line in one call and flush it. Kestra reads a pipe, where output is buffered, so an unflushed line arrives late or is lost when the task is killed.
+- Write each line in one call and flush it. Kestra reads a pipe, where output is buffered, so an unflushed line arrives late or is lost when the task is killed. Lines from several threads never interleave.
 - Test every feature, including the line terminators and non-ASCII text. Each language has a CI job, and the `release` job needs all of them.
 - A new language gets a README with install, a flow example and a table of calls, and a row in the root README.

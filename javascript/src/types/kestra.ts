@@ -8,7 +8,7 @@ export interface KestraFunction {
   assets(asset: any): void;
   outputs(outputs: any): void;
   counter(name: string, value: any, tags?: any): void;
-  timer(name: string, duration: number | ((callback: () => void) => void), tags?: any): void;
+  timer<T>(name: string, duration: number | ((callback: () => void) => T), tags?: any): T | undefined;
   gauge(name: string, value: number, tags?: any): void;
   logger(): Logger;
   context(path?: string | null): Record<string, any>;

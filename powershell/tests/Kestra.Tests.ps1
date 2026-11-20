@@ -73,10 +73,39 @@ Describe 'Send-KestraOutput' {
             Should -BeExactly '::{"outputs":{"rows":1}}::'
     }
 
-    It 'rejects empty outputs and values that are not maps' {
-        { Send-KestraOutput @{} } | Should -Throw '*at least one key*'
-        { Send-KestraOutput ([pscustomobject]@{}) } | Should -Throw '*at least one key*'
+    It 'sends nothing for empty outputs and rejects values that are not maps' {
+        Get-Emitted { Send-KestraOutput @{} } | Should -BeExactly ''
+        Get-Emitted { Send-KestraOutput ([pscustomobject]@{}) } | Should -BeExactly ''
         { Send-KestraOutput @(1, 2) } | Should -Throw '*must be a hashtable or a PSCustomObject*'
+    }
+
+    It 'fails on two keys that read as the same text, at any depth' {
+        $outputs = @{ 1 = 'a' }
+        $outputs['1'] = 'b'
+        { Send-KestraOutput $outputs } | Should -Throw "*two keys read as '1'*"
+        { Send-KestraOutput @{ nested = $outputs } } | Should -Throw "*two keys read as '1'*"
+    }
+
+    It 'fails on NaN and Infinity and on a map that contains itself' {
+        { Send-KestraOutput @{ x = [double]::NaN } } | Should -Throw '*Replace NaN and Infinity with $null*'
+        { Send-KestraOutput @{ x = @(1, [double]::NegativeInfinity) } } | Should -Throw '*Replace NaN and Infinity with $null*'
+        $map = @{}
+        $map.self = $map
+        { Send-KestraOutput $map } | Should -Throw '*nested more than 90 levels deep or contains itself*'
+    }
+
+    It 'sends dates as ISO text, and a date without a time zone stays local' {
+        $local = [datetime]::new(2026, 11, 16, 10, 0, 0, [System.DateTimeKind]::Unspecified)
+        $utc = [datetime]::new(2026, 11, 16, 9, 0, 0, [System.DateTimeKind]::Utc)
+        $offset = [datetimeoffset]::new(2026, 11, 16, 10, 0, 0, [timespan]::FromHours(1))
+
+        Get-Emitted { Send-KestraOutput ([ordered]@{ local = $local; utc = $utc; offset = $offset }) } |
+            Should -BeExactly '::{"outputs":{"local":"2026-11-16T10:00:00.0000000","utc":"2026-11-16T09:00:00.0000000Z","offset":"2026-11-16T10:00:00.0000000+01:00"}}::'
+    }
+
+    It 'keeps empty and one-element arrays as arrays' {
+        Get-Emitted { Send-KestraOutput ([ordered]@{ none = @(); one = @(1); nested = @(@(), @(2)) }) } |
+            Should -BeExactly '::{"outputs":{"none":[],"one":[1],"nested":[[],[2]]}}::'
     }
 }
 
@@ -110,10 +139,16 @@ Describe 'metrics' {
         $metric = (ConvertFrom-Emitted (Get-Emitted { Send-KestraGauge queue 3 ([ordered]@{ shard = 2; ok = $true }) })).metrics[0]
 
         $metric.tags.shard | Should -BeExactly '2'
-        $metric.tags.ok | Should -BeExactly 'True'
+        $metric.tags.ok | Should -BeExactly 'true'
         { Send-KestraGauge queue 3 @{ shard = @{ a = 1 } } } | Should -Throw "*tag 'shard' must be a single value*"
         { Send-KestraGauge queue 3 @{ shard = @(1, 2) } } | Should -Throw "*tag 'shard' must be a single value*"
         { Send-KestraGauge queue 3 @{ shard = $null } } | Should -Throw "*tag 'shard' must be a single value*"
+    }
+
+    It 'fails on two tags that read as the same text' {
+        $tags = @{ 1 = 'a' }
+        $tags['1'] = 'b'
+        { Send-KestraGauge queue 3 $tags } | Should -Throw "Metric 'queue' has two tags named '1'."
     }
 
     It 'rejects a missing or non-numeric value instead of sending 0' {
@@ -135,6 +170,13 @@ Describe 'metrics' {
         $metric = (ConvertFrom-Emitted $lines[0]).metrics[0]
         $metric.type | Should -Be 'timer'
         $metric.value | Should -BeGreaterOrEqual 0.2
+    }
+
+    It 'checks the tags before running the script block, and sends nothing if it throws' {
+        $script:isRun = $false
+        { Send-KestraTimer fit -ScriptBlock { $script:isRun = $true } -Tags @{ env = @(1, 2) } } | Should -Throw "*tag 'env' must be a single value*"
+        $script:isRun | Should -BeFalse
+        Get-Emitted { try { Send-KestraTimer fit -ScriptBlock { throw 'boom' } } catch { $null = $_ } } | Should -BeExactly ''
     }
 
     It 'runs the script block in the caller scope' {
@@ -172,6 +214,48 @@ Describe 'Write-KestraLog' {
             Should -BeExactly @('::{"logs":[{"level":"INFO","message":"a"}]}::', '::{"logs":[{"level":"INFO","message":""}]}::')
     }
 
+    It 'never fails on a value whose ToString() throws or a list that contains itself' {
+        $broken = [pscustomobject]@{ a = 1 }
+        $broken | Add-Member -MemberType ScriptMethod -Name ToString -Value { throw 'no text' } -Force
+        $list = [System.Collections.ArrayList]::new()
+        $null = $list.Add($list)
+
+        # Parsed, as Windows PowerShell escapes < and > as \u003c and \u003e.
+        (ConvertFrom-Emitted (Get-Emitted { Write-KestraLog Info $broken })).logs[0].message |
+            Should -BeExactly '<System.Management.Automation.PSCustomObject>'
+        Get-Emitted { Write-KestraLog Info 'x' $list } |
+            Should -BeExactly '::{"logs":[{"level":"INFO","message":"x"},{"level":"INFO","message":"System.Collections.ArrayList"}]}::'
+    }
+
+    It 'sends one entry per item of any collection, and joins a nested collection with spaces' {
+        $values = @{ a = 'v1' }
+        $set = [System.Collections.Generic.HashSet[int]]::new()
+        $null = $set.Add(7)
+        $null = $set.Add(8)
+        $queue = [System.Collections.Generic.Queue[string]]::new()
+        $queue.Enqueue('m1')
+        $queue.Enqueue('m2')
+
+        Get-Emitted { Write-KestraLog Info $values.Values } | Should -BeExactly '::{"logs":[{"level":"INFO","message":"v1"}]}::'
+        Get-Emitted { Write-KestraLog Info $set } | Should -BeExactly '::{"logs":[{"level":"INFO","message":"7"},{"level":"INFO","message":"8"}]}::'
+        Get-Emitted { Write-KestraLog Info $queue } | Should -BeExactly '::{"logs":[{"level":"INFO","message":"m1"},{"level":"INFO","message":"m2"}]}::'
+        Get-Emitted { Write-KestraLog Info @(@(1, 2), 'z') } | Should -BeExactly '::{"logs":[{"level":"INFO","message":"1 2"},{"level":"INFO","message":"z"}]}::'
+    }
+
+    It 'shows at most 1000 items' {
+        $payload = ConvertFrom-Emitted (Get-Emitted { Write-KestraLog Info (1..1500) })
+        $payload.logs.Count | Should -Be 1001
+        $payload.logs[-1].message | Should -BeExactly '...'
+
+        (ConvertFrom-Emitted (Get-Emitted { Write-KestraLog Info @(, (1..1500)) })).logs[0].message | Should -BeLike '* 999 1000 ...'
+    }
+
+    It 'never enumerates a sequence that is not a list' {
+        $endless = [System.Linq.Enumerable]::Repeat('x', [int]::MaxValue)
+
+        Get-Emitted { Write-KestraLog Info $endless } | Should -Match '^::\{"logs":\[\{"level":"INFO","message":"System\.Linq\.[^"]+"\}\]\}::$'
+    }
+
     It 'rejects unknown levels' {
         { Write-KestraLog Fatal 'x' } | Should -Throw
     }
@@ -187,8 +271,15 @@ Describe 'Send-KestraAsset' {
         $payload.assets.outputs[0].metadata.owner | Should -Be 'team_a'
     }
 
-    It 'rejects empty assets' {
-        { Send-KestraAsset @{} } | Should -Throw '*inputs or outputs*'
+    It 'sends empty lists, and nothing for empty assets' {
+        Get-Emitted { Send-KestraAsset @{ outputs = @() } } | Should -BeExactly '::{"assets":{"outputs":[]}}::'
+        Get-Emitted { Send-KestraAsset @{} } | Should -BeExactly ''
+    }
+
+    It 'accepts only inputs and outputs arrays' {
+        { Send-KestraAsset @{ output = @() } } | Should -Throw "Assets hold only inputs and outputs, not 'output'."
+        { Send-KestraAsset @{ inputs = @{ id = 'raw.orders' } } } | Should -Throw '*Asset inputs must be an array*'
+        { Send-KestraAsset @{ inputs = 'raw.orders' } } | Should -Throw '*Asset inputs must be an array*'
     }
 }
 
@@ -249,6 +340,27 @@ Describe 'Get-KestraContext' {
             { Get-KestraContext -Path $env:KESTRA_EXECUTION_CONTEXT_FILE } |
                 Should -Throw -ExceptionType ([System.IO.InvalidDataException]) -ExpectedMessage "*$($env:KESTRA_EXECUTION_CONTEXT_FILE)*"
         }
+    }
+
+    It 'treats an empty path as none' {
+        (Get-KestraContext -Path '').labels.env | Should -Be 'prod'
+    }
+
+    It 'fails on a directory instead of falling back to KESTRA_CONTEXT' {
+        $env:KESTRA_EXECUTION_CONTEXT_FILE = $TestDrive
+        $env:KESTRA_CONTEXT = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"vars": {"n": 42}}'))
+
+        { Get-KestraContext } | Should -Throw -ExceptionType ([System.IO.IOException]) -ExpectedMessage "Kestra execution context file '$TestDrive' cannot be read: it is a directory."
+    }
+
+    It 'fails with distinct messages for invalid base64, invalid JSON and JSON that is not an object' {
+        $env:KESTRA_EXECUTION_CONTEXT_FILE = Join-Path $TestDrive 'missing.json'
+        $env:KESTRA_CONTEXT = 'not base64!'
+        { Get-KestraContext } | Should -Throw 'The KESTRA_CONTEXT environment variable is not valid base64.'
+        $env:KESTRA_CONTEXT = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{oops'))
+        { Get-KestraContext } | Should -Throw 'The execution context in KESTRA_CONTEXT is not valid JSON.'
+        $env:KESTRA_CONTEXT = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('[1]'))
+        { Get-KestraContext } | Should -Throw 'The execution context in KESTRA_CONTEXT is not a JSON object.'
     }
 
     It 'throws FileNotFoundException outside a Kestra task' {

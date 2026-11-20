@@ -60,4 +60,4 @@ tasks:
 | `kestra.Logger().Debug/Info/Warn/Error(msg, args...)` | Log line at that level, attributes appended as `key=value` |
 | `kestra.Context()` or `kestra.LoadContext(path)` | The execution context as a map, read once by `Context()`. Needs `executionContext: true` on the task |
 
-`tags` may be nil. Every call returns an error for invalid input, for example empty outputs or a NaN metric. `kestra.Logger()` is a standard `*slog.Logger`, so `slog.SetDefault(kestra.Logger())` sends all `slog` logging to Kestra. Calls are safe from several goroutines.
+`tags` may be nil. Every call returns an error for invalid input, for example a NaN output or metric, or an asset key other than `inputs` and `outputs`, which must be lists. Empty outputs or assets send nothing. Log attribute values are expanded at most 10 levels deep and 1000 items long, so a map or slice that contains itself is safe to log. `kestra.Logger()` is a standard `*slog.Logger`, so `slog.SetDefault(kestra.Logger())` sends all `slog` logging to Kestra. Calls are safe from several goroutines.

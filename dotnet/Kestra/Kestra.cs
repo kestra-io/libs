@@ -263,22 +263,7 @@ public static class Kestra
 
     private static JsonNode? ToNode(object? value)
     {
-        JsonNode? node;
-        try
-        {
-            node = JsonSerializer.SerializeToNode(value, Options);
-        }
-        // Any error, including one thrown by a property getter, means the value cannot be sent.
-        catch (Exception e) when (e is not OutOfMemoryException)
-        {
-            var reason = e switch
-            {
-                NotFiniteException => "replace NaN and Infinity with null.",
-                JsonException when e.Message.Contains("cycle", StringComparison.Ordinal) => "it is nested too deep or contains itself.",
-                _ => e.Message + " Convert it first, for example with ToString().",
-            };
-            throw new ArgumentException($"This value cannot be sent to Kestra as JSON: {reason}", e);
-        }
+        var node = JsonSerializer.SerializeToNode(ToElement(value));
         try
         {
             // A Hashtable with the keys 1 and "1" serializes two equal JSON keys. JsonObject finds them only when read,
@@ -290,6 +275,26 @@ public static class Kestra
             throw new ArgumentException("This value cannot be sent to Kestra as JSON: two keys read as the same text, such as 1 and \"1\".", e);
         }
         return node;
+    }
+
+    private static JsonElement ToElement(object? value)
+    {
+        try
+        {
+            return JsonSerializer.SerializeToElement(value, Options);
+        }
+        // Any error, including one thrown by a property getter, means the value cannot be sent. The cause stays as the inner exception.
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            var reason = e switch
+            {
+                NotFiniteException => e.Message,
+                JsonException when e.Message.Contains("cycle", StringComparison.Ordinal) => "it is nested too deep or contains itself.",
+                _ => "it holds a value that is not an object, dictionary, list, string, number, boolean or date, or whose property throws. " +
+                    "Convert it first, for example with ToString().",
+            };
+            throw new ArgumentException($"This value cannot be sent to Kestra as JSON: {reason}", e);
+        }
     }
 
     private static void Validate(JsonNode? node)
@@ -331,24 +336,31 @@ public static class Kestra
             throw new ArgumentException("Metric name must be a non-empty string.", nameof(name));
         }
         var stringTags = new JsonObject();
-        if (tags is not null)
+        if (tags is null)
         {
-            var map = ToObject(tags, $"Metric '{name}' tags must be an object or a dictionary, for example new {{ env = \"prod\" }}.");
-            foreach (var (key, tag) in map)
+            return stringTags;
+        }
+        // An element, not a JsonObject, so the keys 1 and "1" of a Hashtable both show up and can be named.
+        var map = ToElement(tags);
+        if (map.ValueKind != JsonValueKind.Object)
+        {
+            throw new ArgumentException($"Metric '{name}' tags must be an object or a dictionary, for example new {{ env = \"prod\" }}.", nameof(tags));
+        }
+        foreach (var tag in map.EnumerateObject())
+        {
+            if (stringTags.ContainsKey(tag.Name))
             {
-                if (tag is not JsonValue single)
-                {
-                    throw new ArgumentException($"Metric '{name}' tag '{key}' must be a single value, for example new {{ env = \"prod\" }}.", nameof(tags));
-                }
-                // Kestra reads tags as a map of strings.
-                stringTags[key] = single.GetValueKind() switch
-                {
-                    JsonValueKind.String => single.GetValue<string>(),
-                    JsonValueKind.True => "true",
-                    JsonValueKind.False => "false",
-                    _ => single.ToJsonString(),
-                };
+                throw new ArgumentException($"Metric '{name}' has two tags named '{tag.Name}'.", nameof(tags));
             }
+            // Kestra reads tags as a map of strings.
+            stringTags[tag.Name] = tag.Value.ValueKind switch
+            {
+                JsonValueKind.String => tag.Value.GetString(),
+                JsonValueKind.True => "true",
+                JsonValueKind.False => "false",
+                JsonValueKind.Number => tag.Value.GetRawText(),
+                _ => throw new ArgumentException($"Metric '{name}' tag '{tag.Name}' must be a single value, for example new {{ env = \"prod\" }}.", nameof(tags)),
+            };
         }
         return stringTags;
     }
@@ -390,7 +402,7 @@ public static class Kestra
         }
     }
 
-    private sealed class NotFiniteException : Exception
+    private sealed class NotFiniteException(string reason = "replace NaN and Infinity with null.") : Exception(reason)
     {
     }
 
@@ -429,7 +441,7 @@ public static class Kestra
         {
             if (!double.IsFinite((double)value))
             {
-                throw new ArgumentException($"The number {value} is past the double range and would read as Infinity.");
+                throw new NotFiniteException($"the number {value} is past the double range and would read as Infinity.");
             }
             writer.WriteRawValue(value.ToString(CultureInfo.InvariantCulture));
         }
@@ -443,7 +455,7 @@ public static class Kestra
 /// </summary>
 public sealed class KestraLogger
 {
-    private const int MaxLoggedItems = 100;
+    private const int MaxLoggedItems = 1000;
 
     internal KestraLogger()
     {

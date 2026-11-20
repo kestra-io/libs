@@ -38,16 +38,16 @@ tasks:
 
 | Call | Result in Kestra |
 |------|------------------|
-| `Kestra$outputs(list(...))` | Task outputs under `outputs.<task>.vars` |
-| `Kestra$assets(list(inputs = list(...), outputs = list(...)))` | Input and output assets of the task |
+| `Kestra$outputs(list(...))` | Task outputs under `outputs.<task>.vars`. An empty list sends nothing |
+| `Kestra$assets(list(inputs = list(...), outputs = list(...)))` | Input and output assets of the task. Both are optional unnamed lists or data frames, one row per asset, and an empty list sends nothing |
 | `Kestra$counter(name, value, tags)` | Counter metric |
 | `Kestra$gauge(name, value, tags)` | Gauge metric |
-| `Kestra$timer(name, seconds_or_function, tags)` | Timer metric. A function is timed and its result returned |
-| `Kestra$logger()$trace/debug/info/warn/error(...)` | Log line at that level |
-| `Kestra$context(path = NULL)` | The execution context as a list, for example `Kestra$context()$labels$env`. Needs `executionContext: true` on the task |
+| `Kestra$timer(name, seconds_or_function, tags)` | Timer metric. A function is timed and its result returned. The name and tags are checked before it runs, and no metric is sent if it fails |
+| `Kestra$logger()$trace/debug/info/warn/error(...)` | Log line at that level. A vector argument shows its first 1000 values, joined with spaces |
+| `Kestra$context(path = NULL)` | The execution context as a list, for example `Kestra$context()$labels$env`. Needs `executionContext: true` on the task. An empty `path` counts as none. Without `path`, a missing file falls back to the base64 `KESTRA_CONTEXT` variable. A directory or an unreadable file fails |
 
 `tags` is optional and must be named, as a list or a named vector. Date-times are sent in UTC, for example `2026-11-16T09:00:00Z`.
 
-Metric tags are sent as strings. Numbers keep 15 significant digits, so send larger integers such as byte counts as strings. Invalid UTF-8 bytes become U+FFFD.
+Metric tags are sent as strings, logicals as `"true"` or `"false"`, and two tags with the same name fail. Numbers keep 15 significant digits, so send larger integers such as byte counts as strings. Invalid UTF-8 bytes become U+FFFD. Outputs fail on `NaN`, `Inf` and two keys with the same name.
 
 Length-1 vectors are written as single values. Wrap a value in `I()` to keep it as a JSON array, for example `list(ids = I(42))`.

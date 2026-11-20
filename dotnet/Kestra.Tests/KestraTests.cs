@@ -140,6 +140,8 @@ public class KestraTests : IDisposable
             (loop, "This value cannot be sent to Kestra as JSON: it is nested too deep or contains itself."),
             (colliding, "This value cannot be sent to Kestra as JSON: two keys read as the same text, such as 1 and \"1\"."),
             (new Throwing(), "Convert it first"),
+            (typeof(int), "This value cannot be sent to Kestra as JSON: it holds a value that is not an object, dictionary, list, string, number, boolean " +
+                "or date, or whose property throws. Convert it first, for example with ToString()."),
         })
         {
             Assert.Contains(message, ErrorOf<ArgumentException>(() => Kestra.Outputs(new { v = value })).Message);
@@ -190,6 +192,8 @@ public class KestraTests : IDisposable
             Assert.StartsWith("Metric 'rows' value must be a finite number.", ErrorOf<ArgumentException>(() => Kestra.Counter("rows", value)).Message);
         }
         Assert.StartsWith("Metric 'rows' tags must be an object", ErrorOf<ArgumentException>(() => Kestra.Counter("rows", 1, "prod")).Message);
+        Assert.Equal("Metric 'rows' has two tags named '1'. (Parameter 'tags')",
+            ErrorOf<ArgumentException>(() => Kestra.Counter("rows", 1, new Hashtable { [1] = "a", ["1"] = "b" })).Message);
         foreach (var tag in new object?[] { null, new[] { 1 }, new { a = 1 } })
         {
             Assert.StartsWith("Metric 'rows' tag 'env' must be a single value",
@@ -252,7 +256,7 @@ public class KestraTests : IDisposable
             var loop = new List<object>();
             loop.Add(loop);
             Kestra.Logger.Information("[{Count,4}] [{Name,-3}] {Loop}", 3, "a", loop);
-            Kestra.Logger.Information("{Many} {Set}", Enumerable.Range(1, 101).ToArray(), new HashSet<int> { 7 });
+            Kestra.Logger.Information("{Many} {Set}", Enumerable.Range(1, 1001).ToArray(), new HashSet<int> { 7 });
             Kestra.Logger.Information("{Rows}", rows);
         }).TrimEnd('\n').Split('\n');
         Assert.Equal(new[]
@@ -265,7 +269,7 @@ public class KestraTests : IDisposable
             "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"down null\"}]}::",
             "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"failed x\\nSystem.InvalidOperationException: db down\"}]}::",
             "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"[   3] [a  ] [List\\u00601]\"}]}::",
-            "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"[" + string.Join(", ", Enumerable.Range(1, 100)) + ", ...] [7]\"}]}::",
+            "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"[" + string.Join(", ", Enumerable.Range(1, 1000)) + ", ...] [7]\"}]}::",
             $"::{{\"logs\":[{{\"level\":\"INFO\",\"message\":\"{rows}\"}}]}}::",
         }, lines);
         Assert.Equal(new[] { 1, 2 }, rows.ToArray());
