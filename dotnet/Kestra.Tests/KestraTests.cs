@@ -207,6 +207,9 @@ public class KestraTests : IDisposable
         Assert.True(match.Success && double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) >= 0.02, line);
         Assert.Equal("boom", ErrorOf<InvalidOperationException>(() => Kestra.Timer("fetch", () => throw new InvalidOperationException("boom"))).Message);
         Assert.StartsWith("Timer 'fetch' got an async function", ErrorOf<ArgumentException>(() => Kestra.Timer("fetch", () => Task.Delay(1))).Message);
+        var isRun = false;
+        ErrorOf<ArgumentException>(() => Kestra.Timer("fetch", () => isRun = true, new { env = new[] { 1 } }));
+        Assert.False(isRun);
 
         var real = Console.Out;
         var writer = new StringWriter();

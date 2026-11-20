@@ -125,6 +125,8 @@ public static class Kestra
             throw new ArgumentException($"Timer '{name}' got an async function. Use await Kestra.TimerAsync(...) so the time covers the whole task, " +
                 "with Async.StartAsTask in F#.", nameof(function));
         }
+        // Checked first, so a bad name or tag does not fail after the function has done its work.
+        MetricTags(name, tags);
         var start = Stopwatch();
         var result = function();
         SendMetric(name, "timer", Elapsed(start), tags);
@@ -134,6 +136,7 @@ public static class Kestra
     /// <summary>Times the action. No metric is sent if it throws.</summary>
     public static void Timer(string name, Action action, object? tags = null)
     {
+        MetricTags(name, tags);
         var start = Stopwatch();
         action();
         SendMetric(name, "timer", Elapsed(start), tags);
@@ -142,6 +145,7 @@ public static class Kestra
     /// <summary>Times the async function until its task completes, and returns its result. No metric is sent if it throws.</summary>
     public static async Task<T> TimerAsync<T>(string name, Func<Task<T>> function, object? tags = null)
     {
+        MetricTags(name, tags);
         var start = Stopwatch();
         var result = await function().ConfigureAwait(false);
         SendMetric(name, "timer", Elapsed(start), tags);
@@ -151,6 +155,7 @@ public static class Kestra
     /// <summary>Times the async function until its task completes. No metric is sent if it throws.</summary>
     public static async Task TimerAsync(string name, Func<Task> function, object? tags = null)
     {
+        MetricTags(name, tags);
         var start = Stopwatch();
         await function().ConfigureAwait(false);
         SendMetric(name, "timer", Elapsed(start), tags);
@@ -308,13 +313,22 @@ public static class Kestra
 
     private static void SendMetric(string name, string type, double value, object? tags)
     {
-        if (string.IsNullOrEmpty(name))
-        {
-            throw new ArgumentException("Metric name must be a non-empty string.", nameof(name));
-        }
+        var stringTags = MetricTags(name, tags);
         if (!double.IsFinite(value))
         {
             throw new ArgumentException($"Metric '{name}' value must be a finite number.", nameof(value));
+        }
+        Send(new JsonObject
+        {
+            ["metrics"] = new JsonArray(new JsonObject { ["name"] = name, ["type"] = type, ["value"] = value, ["tags"] = stringTags }),
+        });
+    }
+
+    private static JsonObject MetricTags(string name, object? tags)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            throw new ArgumentException("Metric name must be a non-empty string.", nameof(name));
         }
         var stringTags = new JsonObject();
         if (tags is not null)
@@ -336,10 +350,7 @@ public static class Kestra
                 };
             }
         }
-        Send(new JsonObject
-        {
-            ["metrics"] = new JsonArray(new JsonObject { ["name"] = name, ["type"] = type, ["value"] = value, ["tags"] = stringTags }),
-        });
+        return stringTags;
     }
 
     private static void Send(JsonObject map) => SendLine("::" + map.ToJsonString(Options) + "::");
