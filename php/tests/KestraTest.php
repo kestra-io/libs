@@ -87,16 +87,35 @@ $tests = [
         same("a\nb\u{85}c\u{2028}d\u{2029}e caf\u{e9} \u{1F600}", lines($out)[0]['outputs']['note']);
     },
 
-    'outputs must be a non-empty array with string keys' => function () {
-        fails('Kestra::outputs([]);', 'Outputs must be a non-empty array with string keys');
-        fails('Kestra::outputs([1, 2]);', 'Outputs must be a non-empty array with string keys');
+    'empty outputs and assets send nothing, and outputs need string keys' => function () {
+        [$out, $err, $exit] = run('Kestra::outputs([]); Kestra::assets([]);');
+        same(['', 0], [$out, $exit]);
+        fails('Kestra::outputs([1, 2]);', 'Outputs must be an array with string keys');
     },
 
     'values JSON cannot encode fail with a plain sentence' => function () {
-        fails("Kestra::outputs(['x' => NAN]);", 'Replace NAN and INF with null.');
-        fails("Kestra::outputs(['x' => \"\\xff\"]);", 'Make strings valid UTF-8');
-        [, $err] = run("Kestra::outputs(['x' => fopen('php://memory', 'r')]);");
-        check(str_contains($err, 'cannot be sent to Kestra as JSON') && !str_contains($err, 'NAN'), $err);
+        fails("Kestra::outputs(['x' => NAN]);", 'This value cannot be sent to Kestra as JSON: replace NAN and INF with null.');
+        fails("Kestra::outputs(['x' => \"\\xff\"]);", 'This value cannot be sent to Kestra as JSON: make strings valid UTF-8');
+        fails("Kestra::outputs(['x' => fopen('php://memory', 'r')]);", 'This value cannot be sent to Kestra as JSON: a resource such as a file handle cannot be sent');
+        fails('$a = [1]; $a[] = &$a; Kestra::outputs([\'x\' => $a]);', 'This value cannot be sent to Kestra as JSON: it is nested more than 512 levels deep or contains itself.');
+    },
+
+    'dates are sent as ISO 8601 text in their own time zone' => function () {
+        [$out] = run(<<<'PHP'
+            $paris = new DateTimeZone('Europe/Paris');
+            Kestra::outputs(['at' => new DateTimeImmutable('2026-11-20 10:00:00', $paris), 'list' => [new DateTime('2026-11-20 10:00:00.5', $paris)]]);
+            PHP);
+        same([['outputs' => ['at' => '2026-11-20T10:00:00+01:00', 'list' => ['2026-11-20T10:00:00.500000+01:00']]]], lines($out));
+    },
+
+    'dates inside a stdClass are sent as ISO 8601 text, and an empty stdClass stays {}' => function () {
+        [$out] = run(<<<'PHP'
+            $object = new stdClass();
+            $object->at = new DateTimeImmutable('2026-11-20 10:00:00', new DateTimeZone('Europe/Paris'));
+            $object->empty = new stdClass();
+            Kestra::outputs(['object' => $object]);
+            PHP);
+        same(['::{"outputs":{"object":{"at":"2026-11-20T10:00:00+01:00","empty":{}}}}::'], explode("\n", trim($out)));
     },
 
     'metrics have number values, string tags and an object for no tags' => function () {
@@ -136,6 +155,11 @@ $tests = [
         check($metric['value'] > 0.04 && $metric['value'] < 5, 'timer value in seconds: ' . $metric['value']);
     },
 
+    'timer checks the name and tags before running the callable' => function () {
+        [$out, $err, $exit] = run("Kestra::timer('fit', function () { echo 'ran'; }, ['env' => null]);");
+        check($exit !== 0 && !str_contains($out, 'ran') && str_contains($err, "Metric 'fit' tag 'env' must be a single value"), $out . $err);
+    },
+
     'timer sends nothing when the callable throws' => function () {
         [$out, $err, $exit] = run("Kestra::timer('fit', function () { throw new LogicException('boom'); });");
         same('', $out);
@@ -165,6 +189,17 @@ $tests = [
         same(['2 orders, dry true, missing {nope}', "caf\u{e9} \u{fffd} a\nb\u{85}c\u{2028}d\u{2029}e"], array_map(fn ($line) => $line['logs'][0]['message'], lines($out)));
     },
 
+    'logging a value whose __toString throws, or that contains itself, never fails' => function () {
+        [$out, $err] = run(<<<'PHP'
+            $bad = new class { public function __toString(): string { throw new RuntimeException('boom'); } };
+            $self = [1];
+            $self[] = &$self;
+            Kestra::logger()->info($bad);
+            Kestra::logger()->info('{bad} {self}', ['bad' => $bad, 'self' => $self]);
+            PHP);
+        same(['[object class@anonymous]', '[object class@anonymous] {self}'], array_map(fn ($line) => $line['logs'][0]['message'], lines($out)));
+    },
+
     'logger appends a PSR-3 exception from the context' => function () {
         [$out] = run("Kestra::logger()->error('Import failed', ['exception' => new RuntimeException('db down')]);");
         $message = lines($out)[0]['logs'][0]['message'];
@@ -181,7 +216,14 @@ $tests = [
     'assets are sent as given' => function () {
         [$out] = run("Kestra::assets(['inputs' => [['id' => 'raw.orders']], 'outputs' => [['id' => 'sales.orders', 'type' => 'TABLE', 'metadata' => ['rows' => 120]]]]);");
         same([['assets' => ['inputs' => [['id' => 'raw.orders']], 'outputs' => [['id' => 'sales.orders', 'type' => 'TABLE', 'metadata' => ['rows' => 120]]]]]], lines($out));
-        fails('Kestra::assets([]);', 'Assets must be a non-empty array with string keys');
+    },
+
+    'assets hold only lists of inputs and outputs' => function () {
+        fails("Kestra::assets(['output' => []]);", "Assets hold only inputs and outputs, not 'output'.");
+        fails("Kestra::assets([['id' => 'x']]);", "Assets hold only inputs and outputs, not '0'.");
+        fails("Kestra::assets(['inputs' => ['id' => 'raw.orders']]);", 'Asset inputs must be a list');
+        [$out] = run("Kestra::assets(['inputs' => []]);");
+        same([['assets' => ['inputs' => []]]], lines($out));
     },
 
     'context is read from the default file once' => function () {
@@ -229,17 +271,24 @@ $tests = [
         check(!str_contains($err, 'KESTRA_CONTEXT'), $err);
     },
 
-    'an empty file variable means the default file' => function () {
+    'an empty file variable or path means the default file' => function () {
         $dir = contextDir('{"execution":{"id":"default"}}');
         [$out] = run("echo Kestra::context()['execution']['id'];", ['KESTRA_EXECUTION_CONTEXT_FILE' => ''], $dir);
         same('default', $out);
+        [$out] = run("echo Kestra::context('')['execution']['id'];", [], $dir);
+        same('default', $out);
+    },
+
+    'a directory fails instead of falling back to the variable' => function () {
+        $dir = contextDir('{}');
+        fails('Kestra::context();', "Kestra execution context file '$dir' cannot be read: it is a directory.", ['KESTRA_EXECUTION_CONTEXT_FILE' => $dir, 'KESTRA_CONTEXT' => base64_encode('{"a":1}')]);
     },
 
     'context that is not a JSON object names the source' => function () {
         fails('Kestra::context();', 'The execution context in .kestra-execution-context.json is not a JSON object.', [], contextDir('[1, 2]'));
-        fails('Kestra::context();', 'The execution context in .kestra-execution-context.json is not a JSON object.', [], contextDir('{oops'));
+        fails('Kestra::context();', 'The execution context in .kestra-execution-context.json is not valid JSON', [], contextDir('{oops'));
         fails('Kestra::context();', 'The execution context in KESTRA_CONTEXT is not a JSON object.', ['KESTRA_CONTEXT' => base64_encode('[]')]);
-        fails('Kestra::context();', 'The execution context in KESTRA_CONTEXT is not a JSON object.', ['KESTRA_CONTEXT' => 'not base64!']);
+        fails('Kestra::context();', 'The KESTRA_CONTEXT environment variable is not valid base64.', ['KESTRA_CONTEXT' => 'not base64!']);
     },
 
     'context fails clearly outside Kestra' => function () {

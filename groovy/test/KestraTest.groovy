@@ -157,6 +157,8 @@ test('logger levels, placeholders and a trailing exception') {
         a << b
         Kestra.logger.info('c {}', a)
         Kestra.logger.info(new Object() { String toString() { null } })
+        Kestra.logger.info('d {}', new Object() { String toString() { assert false } })
+        Kestra.logger.error('e', new IllegalStateException() { String getMessage() { assert false } })
     }
     List<String> rows = lines.readLines()
     assert rows[0..3] == [
@@ -169,7 +171,9 @@ test('logger levels, placeholders and a trailing exception') {
     assert rows[6].startsWith('::{"logs":[{"level":"WARN","message":"b {}\\njava.lang.IllegalStateException: consumed\\n\\tat ')
     assert rows[7] == '::{"logs":[{"level":"INFO","message":"c [FAILED toString()]"}]}::'
     assert rows[8] == '::{"logs":[{"level":"INFO","message":"null"}]}::'
-    assert rows.size() == 9 && rows[4].startsWith('::{"logs":[{"level":"ERROR","message":"failed x\\njava.lang.IllegalStateException: boom\\n\\tat ')
+    assert rows[9] == '::{"logs":[{"level":"INFO","message":"d [FAILED toString()]"}]}::'
+    assert rows[10].startsWith('::{"logs":[{"level":"ERROR","message":"e\\n') && rows[10].endsWith(': [FAILED getMessage()]"}]}::')
+    assert rows.size() == 11 && rows[4].startsWith('::{"logs":[{"level":"ERROR","message":"failed x\\njava.lang.IllegalStateException: boom\\n\\tat ')
 }
 
 test('assets keep empty lists and empty metadata') {

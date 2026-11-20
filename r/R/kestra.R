@@ -34,11 +34,27 @@ Kestra$format <- function(map) {
 }
 
 Kestra$outputs <- function(outputs) {
-  send(list(outputs = as_object(outputs, "outputs")))
+  if (length(outputs) == 0) {
+    return(invisible(NULL))
+  }
+  send(list(outputs = as_object(outputs, "Outputs")))
 }
 
 Kestra$assets <- function(assets) {
-  send(list(assets = as_object(assets, "assets")))
+  if (length(assets) == 0) {
+    return(invisible(NULL))
+  }
+  assets <- as_object(assets, "Assets")
+  for (key in names(assets)) {
+    if (!key %in% c("inputs", "outputs")) {
+      stop(sprintf("Assets hold only inputs and outputs, not '%s'.", key), call. = FALSE)
+    }
+    # toJSON sends a data frame as a list of rows.
+    if (!is.data.frame(assets[[key]]) && (!is.list(assets[[key]]) || !is.null(names(assets[[key]])))) {
+      stop(sprintf("Asset %s must be an unnamed list, for example list(list(id = \"sales.orders\", type = \"TABLE\")).", key), call. = FALSE)
+    }
+  }
+  send(list(assets = assets))
 }
 
 Kestra$counter <- function(name, value, tags = NULL) {
@@ -55,6 +71,8 @@ Kestra$timer <- function(name, duration, tags = NULL) {
     return(send_metric(name, "timer", duration, tags))
   }
 
+  # Checked before the function runs, so a typo does not cost a long run.
+  tags <- metric_tags(name, tags)
   start <- proc.time()[["elapsed"]]
   result <- duration()
   send_metric(name, "timer", proc.time()[["elapsed"]] - start, tags)
@@ -64,9 +82,24 @@ Kestra$timer <- function(name, duration, tags = NULL) {
 log_at <- function(level) {
   # Each argument is collapsed first, so a vector prints like cat() does instead of recycling the other arguments.
   function(...) {
-    message <- paste0(vapply(list(...), paste, character(1), collapse = " "), collapse = "")
+    message <- paste0(vapply(list(...), log_text, character(1)), collapse = "")
     send(list(logs = list(list(level = level, message = message))))
   }
+}
+
+max_log_values <- 1000
+
+# A log call never fails: values paste() cannot read, such as environments and functions, are shown by their class.
+log_text <- function(x) {
+  extra <- length(x) - max_log_values
+  text <- tryCatch({
+    if (extra > 0) x <- x[seq_len(max_log_values)]
+    paste(x, collapse = " ")
+  }, error = function(e) NULL)
+  if (!is.character(text) || length(text) != 1) {
+    return(sprintf("<%s>", class(x)[[1]]))
+  }
+  if (extra > 0) sprintf("%s ... and %d more", text, extra) else text
 }
 
 logger <- list(
@@ -83,16 +116,23 @@ context_file <- ".kestra-execution-context.json"
 cache <- new.env(parent = emptyenv())
 
 Kestra$context <- function(path = NULL) {
+  if (identical(path, "")) {
+    path <- NULL
+  }
   if (is.null(path) && !is.null(cache$context)) {
     return(cache$context)
   }
   env_file <- Sys.getenv("KESTRA_EXECUTION_CONTEXT_FILE")
   file <- if (!is.null(path)) path else if (nzchar(env_file)) env_file else context_file
-  is_file <- file_test("-f", file)
-  encoded <- Sys.getenv("KESTRA_CONTEXT")
+  # Only a missing file falls back: a directory or an unreadable file is reported.
+  is_file <- file.exists(file)
+  encoded <- gsub("[[:space:]]", "", Sys.getenv("KESTRA_CONTEXT"))
   json <- if (is_file) {
-    readChar(file, file.size(file), useBytes = TRUE)
+    read_context_file(file)
   } else if (is.null(path) && nzchar(encoded)) {
+    if (nchar(encoded) %% 4 != 0 || !grepl("^[A-Za-z0-9+/]*={0,2}$", encoded)) {
+      stop("The KESTRA_CONTEXT environment variable is not valid base64.", call. = FALSE)
+    }
     rawToChar(jsonlite::base64_dec(encoded))
   } else if (!is.null(path)) {
     stop(sprintf("Kestra execution context file '%s' does not exist.", path), call. = FALSE)
@@ -103,14 +143,28 @@ Kestra$context <- function(path = NULL) {
     ), file), call. = FALSE)
   }
   Encoding(json) <- "UTF-8"
-  context <- tryCatch(jsonlite::fromJSON(json, simplifyVector = FALSE), error = function(e) NULL)
-  if (!is.list(context) || (length(context) > 0 && is.null(names(context)))) {
-    stop(sprintf("The execution context in %s is not a JSON object.", if (is_file) file else "KESTRA_CONTEXT"), call. = FALSE)
+  source <- if (is_file) file else "KESTRA_CONTEXT"
+  context <- tryCatch(jsonlite::fromJSON(json, simplifyVector = FALSE), error = function(e) {
+    stop(sprintf("The execution context in %s is not valid JSON.", source), call. = FALSE)
+  })
+  # An empty JSON array reads as an empty list too.
+  if (!is.list(context) || !grepl("^[[:space:]]*[{]", json)) {
+    stop(sprintf("The execution context in %s is not a JSON object.", source), call. = FALSE)
   }
   if (is.null(path)) {
     cache$context <- context
   }
   context
+}
+
+read_context_file <- function(file) {
+  fail <- function(e) {
+    stop(sprintf("Kestra execution context file '%s' cannot be read: %s", file, conditionMessage(e)), call. = FALSE)
+  }
+  if (dir.exists(file)) {
+    stop(sprintf("Kestra execution context file '%s' cannot be read: it is a directory.", file), call. = FALSE)
+  }
+  tryCatch(readChar(file, file.size(file), useBytes = TRUE), warning = fail, error = fail)
 }
 
 send <- function(map) {
@@ -122,27 +176,46 @@ send <- function(map) {
 }
 
 send_metric <- function(name, type, value, tags) {
-  if (!is.character(name) || length(name) != 1 || is.na(name) || !nzchar(name)) {
-    stop("Metric name must be a single non-empty string.", call. = FALSE)
-  }
+  tags <- metric_tags(name, tags)
   if (inherits(value, "difftime")) {
     value <- as.numeric(value, units = "secs")
   }
   if (!is.numeric(value) || length(value) != 1 || !is.finite(value)) {
     stop(sprintf("Metric '%s' value must be a single finite number.", name), call. = FALSE)
   }
+  # unname(), since a named number such as quantile(x, 0.95) would be sent as an object.
+  send(list(metrics = list(list(name = name, type = type, value = unname(value), tags = tags))))
+}
 
-  # Kestra reads tags as a map of strings.
-  tags <- if (length(tags) == 0) structure(list(), names = character(0)) else as_object(tags, "tags")
+# Checks the name and returns the tags as a named list of strings, which is how Kestra reads them.
+metric_tags <- function(name, tags) {
+  if (!is.character(name) || length(name) != 1 || is.na(name) || !nzchar(name)) {
+    stop("Metric name must be a single non-empty string.", call. = FALSE)
+  }
+  if (length(tags) == 0) {
+    return(structure(list(), names = character(0)))
+  }
+  tags <- as_object(tags, sprintf("Metric '%s' tags", name))
+  names(tags) <- utf8(names(tags))
+  duplicate <- anyDuplicated(names(tags))
+  if (duplicate > 0) {
+    stop(sprintf("Metric '%s' has two tags named '%s'.", name, names(tags)[[duplicate]]), call. = FALSE)
+  }
   for (key in names(tags)) {
     tag <- tags[[key]]
     if (!is.atomic(tag) || length(tag) != 1 || is.na(tag)) {
       stop(sprintf("Metric '%s' tag '%s' must be a single value, for example list(env = \"prod\").", name, key), call. = FALSE)
     }
-    tags[[key]] <- as.character(tag)
+    tags[[key]] <- if (is.logical(tag)) {
+      if (tag) "true" else "false"
+    } else if (is.numeric(tag) && !is.object(tag)) {
+      # as.character() would send 100000 as "1e+05".
+      format(tag, digits = 15, scientific = FALSE, trim = TRUE)
+    } else {
+      as.character(tag)
+    }
   }
-  # unname(), since a named number such as quantile(x, 0.95) would be sent as an object.
-  send(list(metrics = list(list(name = name, type = type, value = unname(value), tags = tags))))
+  tags
 }
 
 # Prepares a value for toJSON: named vectors (summary(), coef()) become objects instead of arrays, POSIXlt keeps
@@ -151,19 +224,48 @@ prepare <- function(x) {
   if (inherits(x, "POSIXlt")) {
     x <- as.POSIXct(x)
   }
-  if (is.list(x) && !is.data.frame(x)) {
-    x[] <- lapply(x, prepare)
-    names(x) <- utf8(names(x))
+  if (!is.null(x) && !is.atomic(x) && !is.list(x)) {
+    stop(sprintf(
+      "This value cannot be sent to Kestra as JSON: %s is not a list, vector, data frame or date. Convert it first, for example with as.character().",
+      class(x)[[1]]
+    ), call. = FALSE)
+  }
+  if (is.data.frame(x)) {
+    lapply(x, check_finite)
     return(x)
   }
+  if (is.list(x)) {
+    x[] <- lapply(x, prepare)
+    names(x) <- utf8(names(x))
+    check_keys(names(x))
+    return(x)
+  }
+  check_finite(x)
   if (is.character(x)) {
     x[] <- utf8(x)
   }
   if (is.atomic(x) && !is.null(names(x)) && !inherits(x, "AsIs")) {
     x <- as.list(x)
     names(x) <- utf8(names(x))
+    check_keys(names(x))
   }
   x
+}
+
+# toJSON would send NaN and Inf as strings, which a reader takes for text.
+check_finite <- function(x) {
+  if (is.double(x) && any(is.nan(x) | is.infinite(x))) {
+    stop("This value cannot be sent to Kestra as JSON. Replace NaN and Inf with NA.", call. = FALSE)
+  }
+}
+
+# toJSON would write both keys, and a reader keeps only one of them.
+check_keys <- function(keys) {
+  keys <- keys[!is.na(keys) & nzchar(keys)]
+  duplicate <- anyDuplicated(keys)
+  if (duplicate > 0) {
+    stop(sprintf("This value cannot be sent to Kestra as JSON: two keys read as '%s'.", keys[[duplicate]]), call. = FALSE)
+  }
 }
 
 utf8 <- function(x) {
@@ -185,8 +287,8 @@ utf8 <- function(x) {
 # Unnamed lists would serialize as JSON arrays, so require a name on every element.
 as_object <- function(x, what) {
   keys <- names(x)
-  if (length(x) == 0 || is.null(keys) || any(is.na(keys) | keys == "")) {
-    stop(sprintf("%s must be a non-empty named list, for example list(key = \"value\").", what), call. = FALSE)
+  if (is.null(keys) || any(is.na(keys) | keys == "")) {
+    stop(sprintf("%s must be a named list, for example list(key = \"value\").", what), call. = FALSE)
   }
   as.list(x)
 }

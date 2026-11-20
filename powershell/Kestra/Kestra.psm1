@@ -30,6 +30,125 @@ function ConvertTo-KestraMap {
     throw [System.ArgumentException]::new("$What must be a hashtable or a PSCustomObject, for example @{ key = 'value' }.")
 }
 
+$MaxDepth = 90
+
+# Copies a value into one ConvertTo-Json sends as Kestra reads it, and fails on what it would send wrong or lose.
+function ConvertTo-KestraValue {
+    param([object] $Value, [int] $Depth = 0)
+
+    if ($Depth -gt $MaxDepth) {
+        throw [System.ArgumentException]::new("This value cannot be sent to Kestra as JSON: it is nested more than $MaxDepth levels deep or contains itself.")
+    }
+    if ($null -eq $Value) {
+        return $null
+    }
+    # [string] also drops the note properties Windows PowerShell would send as an object.
+    if ($Value -is [string] -or $Value -is [char]) {
+        return [string]$Value
+    }
+    if (($Value -is [double] -or $Value -is [float]) -and ([double]::IsNaN($Value) -or [double]::IsInfinity($Value))) {
+        throw [System.ArgumentException]::new('This value cannot be sent to Kestra as JSON. Replace NaN and Infinity with $null.')
+    }
+    # Windows PowerShell would send \/Date(...)\/. A DateTime without a time zone stays local.
+    if ($Value -is [datetime] -or $Value -is [datetimeoffset]) {
+        return $Value.ToString('o', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [System.Collections.IDictionary] -or $Value -is [System.Management.Automation.PSCustomObject]) {
+        $map = ConvertTo-KestraMap -InputObject $Value -What 'A map'
+        $copy = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+        foreach ($key in $map.Keys) {
+            $text = [string]$key
+            if ($copy.Contains($text)) {
+                throw [System.ArgumentException]::new("This value cannot be sent to Kestra as JSON: two keys read as '$text'.")
+            }
+            $copy[$text] = ConvertTo-KestraValue -Value $map[$key] -Depth ($Depth + 1)
+        }
+        return $copy
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $Value) {
+            $items.Add((ConvertTo-KestraValue -Value $item -Depth ($Depth + 1)))
+        }
+        return , $items.ToArray()
+    }
+    $Value
+}
+
+# Checks the tags before any work is done, and returns them as strings, which is how Kestra reads them.
+function ConvertTo-KestraTag {
+    param([string] $Name, [object] $Tags)
+
+    $stringTags = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
+    if ($null -ne $Tags) {
+        $map = ConvertTo-KestraMap -InputObject $Tags -What 'Tags'
+        foreach ($key in $map.Keys) {
+            $tag = $map[$key]
+            if ($null -eq $tag -or ($tag -isnot [string] -and $tag -is [System.Collections.IEnumerable]) -or $tag -is [System.Management.Automation.PSCustomObject]) {
+                throw [System.ArgumentException]::new("Metric '$Name' tag '$key' must be a single value, for example @{ env = 'prod' }.")
+            }
+            $text = [string]$key
+            if ($stringTags.Contains($text)) {
+                throw [System.ArgumentException]::new("Metric '$Name' has two tags named '$text'.")
+            }
+            $stringTags[$text] = if ($tag -is [bool]) { if ($tag) { 'true' } else { 'false' } } else { [string]$tag }
+        }
+    }
+    $stringTags
+}
+
+$MaxLogItems = 1000
+
+# Expands only a finite collection, so a lazy or endless sequence is never enumerated. A LINQ iterator also implements ICollection`1.
+function Test-KestraLogCollection {
+    param([object] $Value)
+
+    $null -ne $Value -and $Value -isnot [System.Collections.IDictionary] -and $Value -isnot [System.Collections.IEnumerator] -and
+        ($Value -is [System.Collections.ICollection] -or $null -ne $Value.GetType().GetInterface('ICollection`1'))
+}
+
+# The first $MaxLogItems items, then '...' if there are more.
+function Get-KestraLogItem {
+    param([System.Collections.IEnumerable] $Collection)
+
+    $items = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in $Collection) {
+        if ($items.Count -eq $MaxLogItems) {
+            $items.Add('...')
+            break
+        }
+        $items.Add($item)
+    }
+    , $items
+}
+
+# ToString() for a collection, since [string] would enumerate it.
+function ConvertTo-KestraItemText {
+    param([object] $Value)
+
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) { $Value.ToString() } else { [string]$Value }
+}
+
+# A log call never fails: a ToString() that throws or returns $null shows the type name instead.
+function ConvertTo-KestraText {
+    param([object] $Value)
+
+    if ($null -eq $Value) {
+        return ''
+    }
+    try {
+        $text = if (Test-KestraLogCollection $Value) {
+            # One level joined with spaces, as [string] does, so a collection that contains itself shows its type name.
+            @(foreach ($item in (Get-KestraLogItem $Value)) { ConvertTo-KestraItemText $item }) -join ' '
+        } else {
+            ConvertTo-KestraItemText $Value
+        }
+    } catch {
+        $text = $null
+    }
+    if ($null -eq $text) { "<$($Value.GetType().FullName)>" } else { $text }
+}
+
 function Send-KestraMetric {
     param(
         [string] $Name,
@@ -38,23 +157,11 @@ function Send-KestraMetric {
         [object] $Tags
     )
 
+    $stringTags = ConvertTo-KestraTag -Name $Name -Tags $Tags
     # Typed as object, since a [double] parameter turns $null into 0 before any check runs.
     $number = if ($Value -isnot [bool]) { $Value -as [double] }
     if ($null -eq $number -or [double]::IsNaN($number) -or [double]::IsInfinity($number)) {
         throw [System.ArgumentException]::new("Metric '$Name' value must be a finite number.")
-    }
-
-    # Kestra reads tags as a map of strings.
-    $stringTags = [ordered]@{}
-    if ($null -ne $Tags) {
-        $map = ConvertTo-KestraMap -InputObject $Tags -What 'Tags'
-        foreach ($key in $map.Keys) {
-            $tag = $map[$key]
-            if ($null -eq $tag -or ($tag -isnot [string] -and $tag -is [System.Collections.IEnumerable]) -or $tag -is [System.Management.Automation.PSCustomObject]) {
-                throw [System.ArgumentException]::new("Metric '$Name' tag '$key' must be a single value, for example @{ env = 'prod' }.")
-            }
-            $stringTags[[string]$key] = [string]$tag
-        }
     }
 
     $metric = [ordered]@{ name = $Name; type = $Type; value = $number; tags = $stringTags }
@@ -76,10 +183,9 @@ function Send-KestraOutput {
     process {
         $map = ConvertTo-KestraMap -InputObject $Outputs -What 'Outputs'
         # get_Count(), since $map.Count reads a key named count.
-        if ($map.get_Count() -eq 0) {
-            throw [System.ArgumentException]::new('Outputs must contain at least one key, for example @{ rows = 42 }.')
+        if ($map.get_Count() -gt 0) {
+            Send-KestraMessage -Message @{ outputs = (ConvertTo-KestraValue -Value $map) }
         }
-        Send-KestraMessage -Message @{ outputs = $map }
     }
 }
 
@@ -95,10 +201,18 @@ function Send-KestraAsset {
 
     process {
         $map = ConvertTo-KestraMap -InputObject $Assets -What 'Assets'
-        if ($map.get_Count() -eq 0) {
-            throw [System.ArgumentException]::new('Assets must contain inputs or outputs, for example @{ outputs = @(@{ id = ''sales.orders''; type = ''TABLE'' }) }.')
+        foreach ($key in $map.Keys) {
+            if ($key -cne 'inputs' -and $key -cne 'outputs') {
+                throw [System.ArgumentException]::new("Assets hold only inputs and outputs, not '$key'.")
+            }
+            $list = $map[$key]
+            if ($list -isnot [System.Collections.IList] -or $list -is [System.Collections.IDictionary]) {
+                throw [System.ArgumentException]::new("Asset $key must be an array, for example @(@{ id = 'sales.orders'; type = 'TABLE' }).")
+            }
         }
-        Send-KestraMessage -Message @{ assets = $map }
+        if ($map.get_Count() -gt 0) {
+            Send-KestraMessage -Message @{ assets = (ConvertTo-KestraValue -Value $map) }
+        }
     }
 }
 
@@ -160,6 +274,8 @@ function Send-KestraTimer {
         return
     }
 
+    # Checked before the block runs, so a typo does not cost a long run.
+    $null = ConvertTo-KestraTag -Name $Name -Tags $Tags
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     # Dot-sourced, so variables the block sets stay visible to the caller.
     . $ScriptBlock
@@ -178,14 +294,18 @@ function Write-KestraLog {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)] [ValidateSet('Trace', 'Debug', 'Info', 'Warn', 'Error')] [string] $Level,
-        [Parameter(Mandatory, Position = 1, ValueFromPipeline, ValueFromRemainingArguments)] [AllowNull()] [AllowEmptyString()] [AllowEmptyCollection()] [string[]] $Message
+        [Parameter(Mandatory, Position = 1, ValueFromPipeline, ValueFromRemainingArguments)] [AllowNull()] [AllowEmptyString()] [AllowEmptyCollection()] [object] $Message
     )
 
     process {
-        if ($null -eq $Message) {
-            $Message = ''
+        # Typed as object, so binding never enumerates a lazy or endless sequence.
+        if (Test-KestraLogCollection $Message) {
+            $lines = Get-KestraLogItem $Message
+        } else {
+            $lines = [object[]]::new(1)
+            $lines[0] = $Message
         }
-        $logs = @(foreach ($line in $Message) { [ordered]@{ level = $Level.ToUpperInvariant(); message = [string]$line } })
+        $logs = @(foreach ($line in $lines) { [ordered]@{ level = $Level.ToUpperInvariant(); message = (ConvertTo-KestraText $line) } })
         Send-KestraMessage -Message @{ logs = $logs }
     }
 }
@@ -208,18 +328,36 @@ function Get-KestraContext {
     }
 
     $file = if ($Path) { $Path } elseif ($env:KESTRA_EXECUTION_CONTEXT_FILE) { $env:KESTRA_EXECUTION_CONTEXT_FILE } else { $ContextFile }
-    $json = if (Test-Path -LiteralPath $file -PathType Leaf) {
-        Get-Content -LiteralPath $file -Raw -Encoding UTF8
+    # Only a missing file falls back: a directory or an unreadable file is reported.
+    $isFile = Test-Path -LiteralPath $file
+    $json = if ($isFile) {
+        if (Test-Path -LiteralPath $file -PathType Container) {
+            throw [System.IO.IOException]::new("Kestra execution context file '$file' cannot be read: it is a directory.")
+        }
+        try {
+            [System.IO.File]::ReadAllText($PSCmdlet.GetUnresolvedProviderPathFromPSPath($file), [System.Text.Encoding]::UTF8)
+        } catch {
+            throw [System.IO.IOException]::new("Kestra execution context file '$file' cannot be read: $($_.Exception.InnerException.Message)", $_.Exception.InnerException)
+        }
     } elseif (-not $Path -and $env:KESTRA_CONTEXT) {
-        [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:KESTRA_CONTEXT))
+        try {
+            $bytes = [System.Convert]::FromBase64String($env:KESTRA_CONTEXT)
+        } catch {
+            throw [System.FormatException]::new('The KESTRA_CONTEXT environment variable is not valid base64.')
+        }
+        [System.Text.Encoding]::UTF8.GetString($bytes)
     } elseif ($Path) {
         throw [System.IO.FileNotFoundException]::new("Kestra execution context file '$Path' does not exist.", $Path)
     } else {
         throw [System.IO.FileNotFoundException]::new("No Kestra execution context found: '$file' does not exist and the KESTRA_CONTEXT environment variable is not set. The execution context is only available when the script runs inside a Kestra task.", $file)
     }
 
-    $source = if (Test-Path -LiteralPath $file -PathType Leaf) { $file } else { 'KESTRA_CONTEXT' }
-    $context = try { ConvertFrom-Json -InputObject $json -ErrorAction Stop } catch { $null }
+    $source = if ($isFile) { $file } else { 'KESTRA_CONTEXT' }
+    $context = try {
+        ConvertFrom-Json -InputObject $json -ErrorAction Stop
+    } catch {
+        throw [System.IO.InvalidDataException]::new("The execution context in $source is not valid JSON.")
+    }
     if ($context -isnot [System.Management.Automation.PSCustomObject]) {
         throw [System.IO.InvalidDataException]::new("The execution context in $source is not a JSON object.")
     }

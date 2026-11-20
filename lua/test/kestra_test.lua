@@ -233,6 +233,13 @@ test('a log call never fails on a __tostring that raises or returns a non-string
     .. '::{"logs":[{"level":"INFO","message":"' .. number_message .. '"}]}::\n')
 end)
 
+test('a log call never fails on a table that contains itself', function()
+  local loop = {}
+  loop[1], loop.self = loop, loop
+  local line = capture(function() kestra.logger:info('%s', loop) end)
+  eq(line, '::{"logs":[{"level":"INFO","message":"' .. tostring(loop) .. '"}]}::\n')
+end)
+
 local CONTEXT = '{"labels":{"team":"caf\\u00e9","raw":"x\127y","emoji":"\\ud83d\\ude00"},"inputs":{"text":"a\\nb \\"q\\"","list":[1,null,2.5,true]},'
   .. '"vars":{"n":-42,"e":1.5e3,"empty":{},"none":null}}'
 local DIR = os.tmpname()

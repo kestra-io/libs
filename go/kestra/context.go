@@ -62,24 +62,24 @@ func readContext(path string) ([]byte, error) {
 				"environment variable is not set, the execution context is only available inside a Kestra task: %w", path, fs.ErrNotExist)
 		}
 		source = "KESTRA_CONTEXT"
-		data, err = base64.StdEncoding.DecodeString(encoded)
+		if data, err = base64.StdEncoding.DecodeString(encoded); err != nil {
+			return nil, fmt.Errorf("kestra: the KESTRA_CONTEXT environment variable is not valid base64: %w", err)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("kestra: read execution context from %s: %w", source, err)
 	}
-	if _, err := decodeContext(data); err != nil {
-		return nil, fmt.Errorf("kestra: execution context in %s is not a JSON object: %w", source, err)
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return nil, fmt.Errorf("kestra: execution context in %s is not valid JSON: %w", source, err)
+	}
+	if _, isObject := value.(map[string]any); !isObject {
+		return nil, fmt.Errorf("kestra: execution context in %s is JSON but not an object", source)
 	}
 	return data, nil
 }
 
 func decodeContext(data []byte) (map[string]any, error) {
 	var context map[string]any
-	if err := json.Unmarshal(data, &context); err != nil {
-		return nil, err
-	}
-	if context == nil {
-		return nil, errors.New("got null")
-	}
-	return context, nil
+	return context, json.Unmarshal(data, &context)
 }

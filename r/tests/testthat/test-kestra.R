@@ -25,9 +25,24 @@ test_that("date-times are sent in UTC and non-ASCII text round-trips", {
   expect_identical(emitted(Kestra$outputs(list(name = "caf\u00e9"))), enc2utf8('::{"outputs":{"name":"caf\u00e9"}}::'))
 })
 
-test_that("outputs must be a named list", {
-  expect_error(Kestra$outputs(list(1, 2)), "outputs must be a non-empty named list")
-  expect_error(Kestra$outputs(list()), "outputs must be a non-empty named list")
+test_that("outputs must be a named list, and an empty one sends nothing", {
+  expect_error(Kestra$outputs(list(1, 2)), "Outputs must be a named list")
+  expect_identical(emitted(Kestra$outputs(list())), character(0))
+})
+
+test_that("two keys that read the same fail instead of sending both", {
+  expect_error(Kestra$outputs(list(a = 1, a = 2)), "two keys read as 'a'", fixed = TRUE)
+  expect_error(Kestra$outputs(list(x = list(b = 1, b = 2))), "two keys read as 'b'", fixed = TRUE)
+  expect_error(Kestra$outputs(list(x = c(b = 1, b = 2))), "two keys read as 'b'", fixed = TRUE)
+})
+
+test_that("NaN, Inf and values JSON cannot carry fail with a plain sentence", {
+  expect_error(Kestra$outputs(list(x = NaN)), "Replace NaN and Inf with NA.", fixed = TRUE)
+  expect_error(Kestra$outputs(list(x = c(1, -Inf))), "Replace NaN and Inf with NA.", fixed = TRUE)
+  expect_error(Kestra$outputs(list(x = data.frame(a = Inf))), "Replace NaN and Inf with NA.", fixed = TRUE)
+  expect_error(Kestra$outputs(list(x = sum)), "function is not a list, vector, data frame or date", fixed = TRUE)
+  expect_error(Kestra$outputs(list(x = new.env())), "environment is not a list, vector, data frame or date", fixed = TRUE)
+  expect_identical(emitted(Kestra$outputs(list(day = as.Date("2026-11-16")))), '::{"outputs":{"day":"2026-11-16"}}::')
 })
 
 test_that("metrics default to empty tags and accept named vectors as tags", {
@@ -48,6 +63,10 @@ test_that("empty tags are allowed", {
   )
 })
 
+test_that("two tags with the same name fail instead of sending one", {
+  expect_error(Kestra$counter("rows", 1, list(env = "a", env = "b")), "Metric 'rows' has two tags named 'env'.", fixed = TRUE)
+})
+
 test_that("metrics reject invalid names and values", {
   expect_error(Kestra$counter("", 1), "Metric name must be a single non-empty string")
   expect_error(Kestra$counter("rows", c(1, 2)), "Metric 'rows' value must be a single finite number")
@@ -66,6 +85,31 @@ test_that("timer measures a function and returns its result", {
   expect_identical(payload$metrics$type, "timer")
   # proc.time() can read slightly under the slept time.
   expect_gt(payload$metrics$value, 0.15)
+})
+
+test_that("timer checks the name and tags before running the function", {
+  is_run <- FALSE
+  expect_error(Kestra$timer("fit", function() is_run <<- TRUE, list("prod")), "Metric 'fit' tags must be a named list")
+  expect_error(Kestra$timer("", function() is_run <<- TRUE), "Metric name must be a single non-empty string")
+  expect_false(is_run)
+})
+
+test_that("timer sends nothing when the function fails", {
+  expect_identical(emitted(try(Kestra$timer("fit", function() stop("boom")), silent = TRUE)), character(0))
+})
+
+test_that("logger never fails on values paste() cannot read, such as an environment that contains itself", {
+  env <- new.env()
+  env$self <- env
+  expect_identical(
+    emitted(Kestra$logger()$info("values: ", env, " ", sum)),
+    '::{"logs":[{"level":"INFO","message":"values: <environment> <function>"}]}::'
+  )
+})
+
+test_that("logger shows the first 1000 values of a long vector", {
+  message <- jsonlite::fromJSON(sub("^::(.*)::$", "\\1", emitted(Kestra$logger()$info(seq_len(1500)))))$logs$message
+  expect_identical(message, paste(paste(1:1000, collapse = " "), "... and 500 more"))
 })
 
 test_that("logger emits the level and joins the message parts", {
@@ -97,8 +141,8 @@ test_that("POSIXlt keeps its time zone and invalid UTF-8 becomes U+FFFD", {
 })
 
 test_that("metric values are plain numbers and tags are strings", {
-  line <- emitted(Kestra$gauge("p95", quantile(c(1, 5, 9), 0.95), list(shard = 2, primary = TRUE)))
-  expect_identical(line, '::{"metrics":[{"name":"p95","type":"gauge","value":8.6,"tags":{"shard":"2","primary":"TRUE"}}]}::')
+  line <- emitted(Kestra$gauge("p95", quantile(c(1, 5, 9), 0.95), list(shard = 2, primary = TRUE, rows = 1e5)))
+  expect_identical(line, '::{"metrics":[{"name":"p95","type":"gauge","value":8.6,"tags":{"shard":"2","primary":"true","rows":"100000"}}]}::')
 
   expect_identical(
     emitted(Kestra$timer("fit", as.difftime(2, units = "mins"))),
@@ -119,7 +163,18 @@ test_that("assets are sent as a named list", {
     '::{"assets":{"inputs":[{"id":"raw.orders"}],',
     '"outputs":[{"id":"sales.orders","type":"TABLE","metadata":{"owner":"team_a"}}]}}::'
   ))
-  expect_error(Kestra$assets(list()), "assets must be a non-empty named list")
+  expect_identical(emitted(Kestra$assets(list(outputs = list()))), '::{"assets":{"outputs":[]}}::')
+  expect_identical(emitted(Kestra$assets(list())), character(0))
+  expect_identical(
+    emitted(Kestra$assets(list(outputs = data.frame(id = "a", type = "TABLE")))),
+    '::{"assets":{"outputs":[{"id":"a","type":"TABLE"}]}}::'
+  )
+})
+
+test_that("assets hold only inputs and outputs lists", {
+  expect_error(Kestra$assets(list(output = list())), "Assets hold only inputs and outputs, not 'output'.", fixed = TRUE)
+  expect_error(Kestra$assets(list(inputs = list(id = "raw.orders"))), "Asset inputs must be an unnamed list", fixed = TRUE)
+  expect_error(Kestra$assets(list(inputs = "raw.orders")), "Asset inputs must be an unnamed list", fixed = TRUE)
 })
 
 context_json <- '{"labels":{"env":"prod"},"inputs":{"text":"a\\nb caf\\u00e9","files":[{"name":"first"},2]}}'
@@ -182,12 +237,37 @@ test_that("an empty KESTRA_EXECUTION_CONTEXT_FILE means the default file", {
   })
 })
 
-test_that("a context that is not a JSON object names the source", {
-  for (content in c("", "null", "[1]", "{")) {
+test_that("an empty path means the default lookup", {
+  with_context_file(function(file) {
+    expect_identical(Kestra$context("")$labels$env, "prod")
+  })
+})
+
+test_that("only a missing file falls back: a directory fails with its read error", {
+  with_context_file(function(file) {
+    Sys.setenv(KESTRA_EXECUTION_CONTEXT_FILE = tempdir(), KESTRA_CONTEXT = jsonlite::base64_enc('{"vars":{"n":42}}'))
+    expect_error(Kestra$context(), sprintf("Kestra execution context file '%s' cannot be read: it is a directory.", tempdir()), fixed = TRUE)
+  })
+})
+
+test_that("a context that is not JSON or not an object names the source", {
+  for (content in c("", "{")) {
     file <- tempfile()
-    writeChar(content, file, eos = NULL)
-    expect_error(Kestra$context(file), file, fixed = TRUE)
+    cat(content, file = file)
+    expect_error(Kestra$context(file), sprintf("The execution context in %s is not valid JSON.", file), fixed = TRUE)
   }
+  for (content in c("null", "[1]", "[]", "1")) {
+    file <- tempfile()
+    cat(content, file = file)
+    expect_error(Kestra$context(file), sprintf("The execution context in %s is not a JSON object.", file), fixed = TRUE)
+  }
+})
+
+test_that("KESTRA_CONTEXT that is not base64 fails with its own message", {
+  with_context_file(function(file) {
+    Sys.setenv(KESTRA_EXECUTION_CONTEXT_FILE = tempfile(), KESTRA_CONTEXT = "not base64!")
+    expect_error(Kestra$context(), "The KESTRA_CONTEXT environment variable is not valid base64.", fixed = TRUE)
+  })
 })
 
 test_that("the context fails clearly outside Kestra", {

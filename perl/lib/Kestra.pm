@@ -30,17 +30,21 @@ sub format {
 
 sub outputs {
     my ($class, $outputs) = @_;
-    croak "Outputs must be a non-empty hash reference, for example Kestra->outputs({ rows => 42 })."
-        unless ref $outputs eq 'HASH' && %$outputs;
-    _send({ outputs => $outputs });
+    croak "Outputs must be a hash reference, for example Kestra->outputs({ rows => 42 })." unless ref $outputs eq 'HASH';
+    _send({ outputs => $outputs }) if %$outputs;
     return;
 }
 
 sub assets {
     my ($class, $assets) = @_;
-    croak "Assets must be a non-empty hash reference, for example Kestra->assets({ outputs => [{ id => 'sales.orders', type => 'TABLE' }] })."
-        unless ref $assets eq 'HASH' && %$assets;
-    _send({ assets => $assets });
+    croak "Assets must be a hash reference, for example Kestra->assets({ outputs => [{ id => 'sales.orders', type => 'TABLE' }] })."
+        unless ref $assets eq 'HASH';
+    for my $key (sort keys %$assets) {
+        croak "Assets hold only inputs and outputs, not '$key'." unless $key eq 'inputs' || $key eq 'outputs';
+        croak "Asset $key must be an array reference, for example [{ id => 'sales.orders', type => 'TABLE' }]."
+            unless ref $assets->{$key} eq 'ARRAY';
+    }
+    _send({ assets => $assets }) if %$assets;
     return;
 }
 
@@ -54,6 +58,8 @@ sub timer {
         _send_metric($name, 'timer', $seconds_or_code, $tags);
         return;
     }
+    # Checked before the code runs, so a typo does not cost a long run.
+    $tags = _metric_tags($name, $tags);
     my $start = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());
     my @result = wantarray ? $seconds_or_code->() : scalar $seconds_or_code->();
     _send_metric($name, 'timer', Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) - $start, $tags);
@@ -67,17 +73,22 @@ sub logger { return $logger //= Kestra::Logger->_new }
 # The default context is read once, and each call returns a new hash the caller may change. Dies outside a Kestra task.
 sub context {
     my ($class, $path) = @_;
+    $path = undef if defined $path && $path eq '';
     return $JSON_UTF8->decode($context_json) if !defined $path && defined $context_json;
 
     my $env_file = $ENV{KESTRA_EXECUTION_CONTEXT_FILE} // '';
     my $file = $path // ($env_file eq '' ? $CONTEXT_FILE : $env_file);
-    my $encoded = $ENV{KESTRA_CONTEXT} // '';
+    (my $encoded = $ENV{KESTRA_CONTEXT} // '') =~ s/\s//g;
     my ($json, $source);
-    if (-f $file) {
+    # Only a missing file falls back: a directory or an unreadable file is reported.
+    if (-e $file) {
         open my $fh, '<:raw', $file or croak "Kestra execution context file '$file' cannot be read: $!.";
         $json = do { local $/; <$fh> };
+        croak "Kestra execution context file '$file' cannot be read: $!." unless defined $json;
         $source = $file;
     } elsif (!defined $path && $encoded ne '') {
+        croak 'The KESTRA_CONTEXT environment variable is not valid base64.'
+            unless length($encoded) % 4 == 0 && $encoded =~ m{^[A-Za-z0-9+/]*={0,2}$};
         $json = MIME::Base64::decode_base64($encoded);
         $source = 'KESTRA_CONTEXT';
     } elsif (defined $path) {
@@ -88,6 +99,7 @@ sub context {
     }
 
     my $context = eval { $JSON_UTF8->decode($json) };
+    croak "The execution context in $source is not valid JSON." if $@;
     croak "The execution context in $source is not a JSON object." unless ref $context eq 'HASH';
     $context_json = $json unless defined $path;
     return $context;
@@ -105,8 +117,15 @@ sub _send {
 
 sub _send_metric {
     my ($name, $type, $value, $tags) = @_;
-    croak 'Metric name must be a non-empty string.' unless defined $name && !ref $name && $name ne '';
+    my $string_tags = _metric_tags($name, $tags);
     croak "Metric '$name' value must be a finite number." unless _is_finite_number($value);
+    _send({ metrics => [{ name => "$name", type => $type, value => 0 + $value, tags => $string_tags }] });
+}
+
+# Checks the name and returns the tags as strings, keyed by their text.
+sub _metric_tags {
+    my ($name, $tags) = @_;
+    croak 'Metric name must be a non-empty string.' unless defined $name && !ref $name && $name ne '';
     $tags //= {};
     croak "Metric '$name' tags must be a hash reference, for example { env => 'prod' }." unless ref $tags eq 'HASH';
     my %string_tags;
@@ -117,10 +136,13 @@ sub _send_metric {
         } elsif (!defined $tag || ref $tag) {
             croak "Metric '$name' tag '$key' must be a single value, for example { env => 'prod' }.";
         }
+        my $text = _text($key, 0);
+        # A byte string and a character string can read as the same key, and one tag would be lost.
+        croak "Metric '$name' has two tags named '$text'." if exists $string_tags{$text};
         # Kestra reads tags as a map of strings.
-        $string_tags{$key} = "$tag";
+        $string_tags{$text} = "$tag";
     }
-    _send({ metrics => [{ name => "$name", type => $type, value => 0 + $value, tags => \%string_tags }] });
+    return \%string_tags;
 }
 
 sub _is_finite_number {
@@ -209,12 +231,21 @@ my %LEVELS = (trace => 'TRACE', debug => 'DEBUG', info => 'INFO', warn => 'WARN'
 
 sub _new { return bless {}, shift }
 
+# An overloaded "" can die, and a log call must not.
+sub _string {
+    my ($value) = @_;
+    return '' unless defined $value;
+    # Twice, since an overloaded "" can return another object.
+    my $text = eval { my $string = "$value"; "$string" };
+    return defined $text ? $text : '<' . ref($value) . '>';
+}
+
 for my $method (keys %LEVELS) {
     no strict 'refs';
     *{$method} = sub {
         my ($self, @message) = @_;
         # Arguments are joined like print joins them. Invalid UTF-8 becomes U+FFFD, so a log call never fails.
-        my $text = Kestra::_text(join('', map { $_ // '' } @message), 1);
+        my $text = Kestra::_text(join('', map { _string($_) } @message), 1);
         Kestra::_send({ logs => [{ level => $LEVELS{$method}, message => $text }] });
         return;
     };
