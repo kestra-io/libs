@@ -236,6 +236,7 @@ public class KestraTests : IDisposable
     public void TheLoggerSendsEachLevelFillsTemplatesAndNeverFails()
     {
         var error = new InvalidOperationException("db down");
+        var rows = new SinglePass();
         var lines = Capture(() =>
         {
             Kestra.Logger.Trace("t");
@@ -248,6 +249,8 @@ public class KestraTests : IDisposable
             var loop = new List<object>();
             loop.Add(loop);
             Kestra.Logger.Information("[{Count,4}] [{Name,-3}] {Loop}", 3, "a", loop);
+            Kestra.Logger.Information("{Many} {Set}", Enumerable.Range(1, 101).ToArray(), new HashSet<int> { 7 });
+            Kestra.Logger.Information("{Rows}", rows);
         }).TrimEnd('\n').Split('\n');
         Assert.Equal(new[]
         {
@@ -259,7 +262,30 @@ public class KestraTests : IDisposable
             "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"down null\"}]}::",
             "::{\"logs\":[{\"level\":\"ERROR\",\"message\":\"failed x\\nSystem.InvalidOperationException: db down\"}]}::",
             "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"[   3] [a  ] [List\\u00601]\"}]}::",
+            "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"[" + string.Join(", ", Enumerable.Range(1, 100)) + ", ...] [7]\"}]}::",
+            $"::{{\"logs\":[{{\"level\":\"INFO\",\"message\":\"{rows}\"}}]}}::",
         }, lines);
+        Assert.Equal(new[] { 1, 2 }, rows.ToArray());
+    }
+
+    private sealed class SinglePass : IEnumerable<int>
+    {
+        private bool isRead;
+
+        public IEnumerator<int> GetEnumerator()
+        {
+            if (isRead)
+            {
+                yield break;
+            }
+            isRead = true;
+            yield return 1;
+            yield return 2;
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        public override string ToString() => "rows";
     }
 
     [Fact]

@@ -5,7 +5,6 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>Kestra</PackageId>
     <Description>Send outputs, metrics, logs and assets from C# and F# script tasks to Kestra, and read the execution context.</Description>

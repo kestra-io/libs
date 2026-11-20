@@ -432,6 +432,8 @@ public static class Kestra
 /// </summary>
 public sealed class KestraLogger
 {
+    private const int MaxLoggedItems = 100;
+
     internal KestraLogger()
     {
     }
@@ -534,8 +536,7 @@ public sealed class KestraLogger
                 null => "null",
                 IFormattable formattable => formattable.ToString(format, CultureInfo.InvariantCulture),
                 string or Exception => value.ToString() ?? "",
-                // Items are not expanded further, so a list that contains itself cannot recurse.
-                IEnumerable items => "[" + string.Join(", ", items.Cast<object?>().Select(item => Text(item is string or not IEnumerable ? item : item.GetType().Name))) + "]",
+                IEnumerable items when IsCollection(items) => List(items),
                 _ => value.ToString() ?? "",
             };
         }
@@ -543,5 +544,20 @@ public sealed class KestraLogger
         {
             return "[FAILED ToString()]";
         }
+    }
+
+    // Lazy sequences are not enumerated: they can be infinite or single-pass, like a yield iterator or a DataReader.
+    private static bool IsCollection(object value) =>
+        value is ICollection || value.GetType().GetInterfaces().Any(type => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyCollection<>));
+
+    // Items are not expanded further, so a list that contains itself cannot recurse.
+    private static string List(IEnumerable items)
+    {
+        var texts = items.Cast<object?>().Take(MaxLoggedItems + 1).Select(item => Text(item is string or not IEnumerable ? item : item.GetType().Name)).ToList();
+        if (texts.Count > MaxLoggedItems)
+        {
+            texts[MaxLoggedItems] = "...";
+        }
+        return "[" + string.Join(", ", texts) + "]";
     }
 }
