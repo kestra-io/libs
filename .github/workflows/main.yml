@@ -323,6 +323,30 @@ jobs:
       - name: Test
         run: groovy test/KestraTest.groovy
 
+  dotnet:
+    name: Test .NET library (${{ matrix.sdk }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ['8.0', '10.0']
+    container: mcr.microsoft.com/dotnet/sdk:${{ matrix.sdk }}
+    defaults:
+      run:
+        working-directory: dotnet
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        run: dotnet test Kestra.Tests/Kestra.Tests.csproj -warnaserror
+
+      - name: Test F# calls
+        run: |
+          dotnet build Kestra/Kestra.csproj -c Release -o out -warnaserror
+          dotnet fsi Kestra.Tests/fsharp.fsx
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -338,6 +362,7 @@ jobs:
       - perl
       - lua
       - groovy
+      - dotnet
     steps:
       - name: Create Release
         uses: actions/create-release@v1
