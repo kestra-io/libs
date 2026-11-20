@@ -95,8 +95,8 @@ test('outputs refuse values Kestra cannot read') {
     assert errorOf { Kestra.outputs([1, 2]) }.message == 'Outputs must be a map, for example Kestra.outputs(rows: 42).'
     assert errorOf { Kestra.format([1]) }.message.startsWith('Kestra lines hold a map')
     // An integer of any size keeps its value, as in Python, and a database row with java.sql dates is sent.
-    assert capture { Kestra.outputs(n: 2G**70, day: new java.sql.Date(0), at: new java.sql.Time(0)) } ==
-        '::{"outputs":{"n":1180591620717411303424,"day":"1970-01-01T00:00:00Z","at":"1970-01-01T00:00:00Z"}}::\n'
+    assert capture { Kestra.outputs(n: 2G**70, day: java.sql.Date.valueOf('2026-01-02'), at: java.sql.Time.valueOf('10:00:00')) } ==
+        '::{"outputs":{"n":1180591620717411303424,"day":"2026-01-02","at":"10:00"}}::\n'
     assert capture { Kestra.outputs([:]); Kestra.assets([:]) } == ''
     assert capture { errorOf { Kestra.outputs(v: Double.NaN) } } == ''
 }
@@ -138,6 +138,9 @@ test('a timed closure returns its result, and sends no metric when it throws') {
     def matcher = line =~ /^::\{"metrics":\[\{"name":"fetch","type":"timer","value":([0-9.E-]+),"tags":\{"env":"qa"\}\}\]\}::\n$/
     assert matcher.matches() && (matcher.group(1) as double) >= 0.015
     assert capture { assert errorOf { Kestra.timer('fetch') { throw new IllegalStateException('boom') } }.message == 'boom' } == ''
+    boolean isRun = false
+    assert errorOf { Kestra.timer('fetch', env: ['a']) { isRun = true } }.message == "Metric 'fetch' tag 'env' must be a single value, for example [env: 'prod']."
+    assert !isRun
 }
 
 test('logger levels, placeholders and a trailing exception') {
@@ -178,6 +181,8 @@ test('assets need inputs and outputs as lists, and no other keys') {
     String key = 'outputs'
     assert capture { Kestra.assets(["$key": []]) } == '::{"assets":{"outputs":[]}}::\n'
     assert errorOf { Kestra.assets(outputs: [id: 'a', type: 'TABLE']) }.message ==
+        "Asset outputs must be a list, for example [[id: 'sales.orders', type: 'TABLE']]."
+    assert errorOf { Kestra.assets(outputs: java.nio.file.Paths.get('sales/orders.csv')) }.message ==
         "Asset outputs must be a list, for example [[id: 'sales.orders', type: 'TABLE']]."
     assert errorOf { Kestra.assets(foo: 1) }.message == "Assets hold only inputs and outputs, not 'foo'."
 }

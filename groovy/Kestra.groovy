@@ -14,7 +14,6 @@ import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.time.Duration
-import java.time.Instant
 import java.time.temporal.TemporalAccessor
 import java.time.temporal.TemporalAmount
 
@@ -68,7 +67,8 @@ class Kestra {
             if (!(String.valueOf(key) in ['inputs', 'outputs'])) {
                 throw new IllegalArgumentException("Assets hold only inputs and outputs, not '$key'.")
             }
-            if (!(value instanceof Iterable || value?.getClass()?.isArray())) {
+            // Collection, not Iterable: a Path is Iterable and would be sent as one string.
+            if (!(value instanceof Collection || value instanceof Iterator || value?.getClass()?.isArray())) {
                 throw new IllegalArgumentException("Asset $key must be a list, for example [[id: 'sales.orders', type: 'TABLE']].")
             }
         }
@@ -97,9 +97,11 @@ class Kestra {
 
     /** Times the closure and returns its result. No metric is sent if it throws. */
     static <T> T timer(String name, Map tags = [:], Closure<T> closure) {
+        // Checked first, so a bad name or tag does not fail after the closure has done its work.
+        Map<String, String> stringTags = metricTags(name, tags)
         long start = System.nanoTime()
         T result = closure.call()
-        sendMetric(name, 'timer', (System.nanoTime() - start) / 1e9d, tags)
+        send([metrics: [[name: name, type: 'timer', value: (System.nanoTime() - start) / 1e9d, tags: stringTags]]])
         result
     }
 
@@ -202,11 +204,16 @@ class Kestra {
     }
 
     private static void sendMetric(String name, String type, Object value, Object tags) {
-        if (!name) {
-            throw new IllegalArgumentException('Metric name must be a non-empty string.')
-        }
+        Map<String, String> stringTags = metricTags(name, tags)
         if (!isFinite(value)) {
             throw new IllegalArgumentException("Metric '$name' value must be a finite number.")
+        }
+        send([metrics: [[name: name, type: type, value: value, tags: stringTags]]])
+    }
+
+    private static Map<String, String> metricTags(String name, Object tags) {
+        if (!name) {
+            throw new IllegalArgumentException('Metric name must be a non-empty string.')
         }
         if (tags != null && !(tags instanceof Map)) {
             throw new IllegalArgumentException("Metric '$name' tags must be a map, for example [env: 'prod'].")
@@ -223,7 +230,7 @@ class Kestra {
             // Kestra reads tags as a map of strings. Numbers keep their text, as str() does in Python.
             stringTags[text] = tag instanceof Number ? tag.toString() : prepare(tag).toString()
         }
-        send([metrics: [[name: name, type: type, value: value, tags: stringTags]]])
+        stringTags
     }
 
     // Kestra reads a metric value as a double, so a BigInteger or BigDecimal past the double range would read as Infinity.
@@ -258,9 +265,15 @@ class Kestra {
             || value instanceof TemporalAmount || value instanceof UUID || value instanceof URI || value instanceof URL || value instanceof File || value instanceof Path) {
             return value.toString()
         }
+        // A SQL DATE or TIME holds a local value, which a UTC instant would shift outside UTC.
+        if (value instanceof java.sql.Date) {
+            return ((java.sql.Date) value).toLocalDate().toString()
+        }
+        if (value instanceof java.sql.Time) {
+            return ((java.sql.Time) value).toLocalTime().toString()
+        }
         if (value instanceof Date) {
-            // Instant.ofEpochMilli, as java.sql.Date and java.sql.Time throw on toInstant().
-            return Instant.ofEpochMilli(((Date) value).time).toString()
+            return ((Date) value).toInstant().toString()
         }
         if (value instanceof Map) {
             Map<String, Object> copy = [:]
