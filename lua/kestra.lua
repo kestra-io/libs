@@ -219,9 +219,8 @@ function kestra.assets(assets)
   send_line(kestra.format({ assets = copy }))
 end
 
-local function send_metric(name, metric_type, value, tags)
+local function metric_tags(name, tags)
   if type(name) ~= 'string' or name == '' then fail('Metric name must be a non-empty string.') end
-  if not is_finite_number(value) then fail("Metric '" .. name .. "' value must be a finite number.") end
   if tags ~= nil and type(tags) ~= 'table' then
     fail("Metric '" .. name .. "' tags must be a table, for example { env = 'prod' }.")
   end
@@ -246,6 +245,12 @@ local function send_metric(name, metric_type, value, tags)
     -- Kestra reads tags as a map of strings.
     string_tags[key] = kind == 'number' and number_text(tag) or tostring(tag)
   end
+  return string_tags
+end
+
+local function send_metric(name, metric_type, value, tags)
+  local string_tags = metric_tags(name, tags)
+  if not is_finite_number(value) then fail("Metric '" .. name .. "' value must be a finite number.") end
   send_line(kestra.format({ metrics = { { name = name, type = metric_type, value = value, tags = string_tags } } }))
 end
 
@@ -276,6 +281,8 @@ function kestra.timer(name, seconds_or_function, tags)
     send_metric(name, 'timer', seconds_or_function, tags)
     return
   end
+  -- Checked first, so a bad name or tag does not fail after the function has done its work.
+  metric_tags(name, tags)
   local start = now()
   local results = pack(seconds_or_function())
   -- Rounded to the clock's 10 ms steps, which subtraction leaves as 1.2700000000004366.
