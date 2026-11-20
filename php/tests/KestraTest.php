@@ -13,11 +13,14 @@ function run(string $code, array $env = [], ?string $cwd = null, bool $isStdin =
     file_put_contents($script, "<?php\nrequire " . var_export(realpath(LIB), true) . ";\nuse Kestra\\Kestra;\n" . $code);
     $base = array_diff_key(getenv(), ['KESTRA_CONTEXT' => 1, 'KESTRA_EXECUTION_CONTEXT_FILE' => 1]);
     $command = $isStdin ? [PHP_BINARY, '-d', 'display_errors=stderr'] : [PHP_BINARY, '-d', 'display_errors=stderr', $script];
-    $process = proc_open($command, [0 => $isStdin ? ['file', $script, 'r'] : ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd ?? sys_get_temp_dir(), $env + $base);
+    // stderr goes to a file: a long stack trace would fill a pipe that is only read after stdout, and hang the test.
+    $errFile = $script . '.err';
+    $process = proc_open($command, [0 => $isStdin ? ['file', $script, 'r'] : ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $errFile, 'w']], $pipes, $cwd ?? sys_get_temp_dir(), $env + $base);
     $out = stream_get_contents($pipes[1]);
-    $err = stream_get_contents($pipes[2]);
     $exit = proc_close($process);
+    $err = file_get_contents($errFile);
     unlink($script);
+    unlink($errFile);
     return [$out, $err, $exit];
 }
 
