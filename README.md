@@ -54,6 +54,7 @@ Libraries to interact with metrics and outputs in Kestra script tasks.
 | PHP | [`php/`](php/) |
 | Perl | [`perl/`](perl/) |
 | Lua | [`lua/`](lua/) |
+| Groovy | [`groovy/`](groovy/) |
 
 ![Kestra orchestrator](https://kestra.io/video.gif)
 
