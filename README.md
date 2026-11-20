@@ -56,6 +56,7 @@ Libraries to interact with metrics and outputs in Kestra script tasks.
 | Lua | [`lua/`](lua/) |
 | Groovy | [`groovy/`](groovy/) |
 | C# and F# (.NET) | [`dotnet/`](dotnet/) |
+| Julia | [`julia/`](julia/) |
 
 ![Kestra orchestrator](https://kestra.io/video.gif)
 

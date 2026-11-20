@@ -347,6 +347,26 @@ jobs:
           dotnet build Kestra/Kestra.csproj -c Release -o out -warnaserror
           dotnet fsi Kestra.Tests/fsharp.fsx
 
+  julia:
+    name: Test Julia module (${{ matrix.julia }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        julia: ['1.6', '1.10', 'latest']
+    container: julia:${{ matrix.julia }}
+    defaults:
+      run:
+        working-directory: julia
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test
+        # Two threads, so the test that writes from several threads runs them in parallel.
+        run: julia --threads 2 test/runtests.jl
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
@@ -363,6 +383,7 @@ jobs:
       - lua
       - groovy
       - dotnet
+      - julia
     steps:
       - name: Create Release
         uses: actions/create-release@v1
