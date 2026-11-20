@@ -298,6 +298,10 @@ function Write-KestraLog {
     )
 
     process {
+        # Windows PowerShell wraps a single remaining argument in a list, which PowerShell 6 and later do not.
+        if ($PSVersionTable.PSVersion.Major -lt 6 -and $Message -is [System.Collections.Generic.List[object]] -and $Message.Count -eq 1) {
+            $Message = $Message[0]
+        }
         # Typed as object, so binding never enumerates a lazy or endless sequence.
         if (Test-KestraLogCollection $Message) {
             $lines = Get-KestraLogItem $Message

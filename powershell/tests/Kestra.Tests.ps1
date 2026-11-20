@@ -220,8 +220,9 @@ Describe 'Write-KestraLog' {
         $list = [System.Collections.ArrayList]::new()
         $null = $list.Add($list)
 
-        Get-Emitted { Write-KestraLog Info $broken } |
-            Should -BeExactly '::{"logs":[{"level":"INFO","message":"<System.Management.Automation.PSCustomObject>"}]}::'
+        # Parsed, as Windows PowerShell escapes < and > as \u003c and \u003e.
+        (ConvertFrom-Emitted (Get-Emitted { Write-KestraLog Info $broken })).logs[0].message |
+            Should -BeExactly '<System.Management.Automation.PSCustomObject>'
         Get-Emitted { Write-KestraLog Info 'x' $list } |
             Should -BeExactly '::{"logs":[{"level":"INFO","message":"x"},{"level":"INFO","message":"System.Collections.ArrayList"}]}::'
     }
