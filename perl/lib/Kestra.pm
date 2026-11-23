@@ -215,6 +215,7 @@ sub _text {
         return $text;
     }
     return $string if $string !~ /[\x80-\xff]/;
+    local $@;
     my $text = eval { Encode::decode('UTF-8', $string, $is_lenient ? Encode::FB_DEFAULT : Encode::FB_CROAK | Encode::LEAVE_SRC) };
     croak 'This value cannot be sent to Kestra as JSON: a string is not valid UTF-8. Decode it first, for example with Encode::decode.'
         unless defined $text;
@@ -235,6 +236,8 @@ sub _new { return bless {}, shift }
 sub _string {
     my ($value) = @_;
     return '' unless defined $value;
+    # local, so logging $@ before rethrowing it does not clear it.
+    local $@;
     # Twice, since an overloaded "" can return another object.
     my $text = eval { my $string = "$value"; "$string" };
     return defined $text ? $text : '<' . ref($value) . '>';

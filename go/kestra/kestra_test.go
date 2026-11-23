@@ -262,6 +262,15 @@ func TestLoggingDecodedJSONShowsEveryLevel(t *testing.T) {
 	}
 }
 
+func TestLoggingANamedByteSliceShowsItsText(t *testing.T) {
+	lines := capture(t, func() { Logger().Info("x", "body", json.RawMessage(`{"a":1}`)) })
+
+	want := `::{"logs":[{"level":"INFO","message":"x body=\"{\\\"a\\\":1}\""}]}::`
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("got %q, want %q", lines, want)
+	}
+}
+
 type panicking struct{}
 
 func (panicking) String() string { panic("boom") }

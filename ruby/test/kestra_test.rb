@@ -134,6 +134,8 @@ class KestraTest < Minitest::Test
 
     assert_equal ['::{"metrics":[{"name":"ratio","type":"gauge","value":0.25,"tags":{"shard":"2","primary":"true"}}]}::',
                   '::{"metrics":[{"name":"price","type":"gauge","value":1.5,"tags":{}}]}::'], lines
+    assert_equal ['::{"metrics":[{"name":"rows","type":"counter","value":1,"tags":{"window":"1..3"}}]}::'],
+                 emitted { Kestra.counter("rows", 1, tags: { window: 1..3 }) }
     assert_raises(ArgumentError) { Kestra.gauge("queue", 1, tags: { a: [1] }) }
     assert_raises(ArgumentError) { Kestra.gauge("queue", 1, tags: { a: nil }) }
   end

@@ -32,6 +32,14 @@ Describe 'Send-KestraOutput' {
         $payload.outputs.nested.ok | Should -BeTrue
     }
 
+    It 'reads an [ordered] dictionary with integer keys by key, not by position' {
+        Get-Emitted { Send-KestraOutput ([ordered]@{ 1 = 'a'; 0 = 'b' }) } | Should -BeExactly '::{"outputs":{"1":"a","0":"b"}}::'
+        Get-Emitted { Send-KestraOutput ([ordered]@{ 5 = 'x' }) } | Should -BeExactly '::{"outputs":{"5":"x"}}::'
+        $tags = (ConvertFrom-Emitted (Get-Emitted { Send-KestraCounter rows 1 ([ordered]@{ 1 = 'a'; 0 = 'b' }) })).metrics[0].tags
+        $tags.'1' | Should -BeExactly 'a'
+        $tags.'0' | Should -BeExactly 'b'
+    }
+
     It 'keeps multi-line strings and Java line terminators on one line' {
         $text = "a`nb" + [char]0x2028 + 'c' + [char]0x2029 + 'd' + [char]0x85 + 'e'
         $lines = @(Get-Emitted { Send-KestraOutput @{ text = $text } })

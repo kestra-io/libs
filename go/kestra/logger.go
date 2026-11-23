@@ -92,7 +92,8 @@ func renderAttr(_ []string, a slog.Attr) slog.Attr {
 	if a.Value.Kind() != slog.KindAny {
 		return a
 	}
-	if _, isBytes := a.Value.Any().([]byte); !isBytes {
+	// Any byte slice, such as json.RawMessage, stays with slog, which prints it as text.
+	if t := reflect.TypeOf(a.Value.Any()); t == nil || t.Kind() != reflect.Slice || t.Elem().Kind() != reflect.Uint8 {
 		a.Value = slog.StringValue(render(a.Value.Any()))
 	}
 	return a

@@ -173,7 +173,7 @@ module Kestra
       raise ArgumentError, "Metric '#{name}' tags must be a Hash, for example tags: { env: \"prod\" }." unless tags.is_a?(Hash)
 
       tags.each_with_object({}) do |(key, tag), string_tags|
-        if tag.nil? || tag.is_a?(Enumerable)
+        if tag.nil? || tag.is_a?(Hash) || tag.is_a?(Array)
           raise ArgumentError, "Metric '#{name}' tag '#{key}' must be a single value, for example tags: { env: \"prod\" }."
         end
 

@@ -201,6 +201,16 @@ subtest 'logger maps Log4perl levels to Kestra levels and joins arguments' => su
         [[TRACE => 'trace'], [DEBUG => 'debug'], [INFO => 'info'], [WARN => 'warn'], [ERROR => 'error'], [ERROR => 'fatal'], [INFO => 'rows: 3 done']]);
 };
 
+subtest 'logging $@ keeps it for a rethrow' => sub {
+    eval { die "orig\n" };
+    my ($line) = lines(capture(sub { Kestra->logger->error('failed: ', $@) }));
+    is($line->{logs}[0]{message}, "failed: orig\n");
+    is($@, "orig\n");
+    eval { die "caf\xc3\xa9\n" };
+    capture(sub { Kestra->logger->error($@) });
+    is($@, "caf\xc3\xa9\n", 'also after decoding UTF-8 bytes');
+};
+
 subtest 'logger never fails on a value that contains itself or cannot be shown as text' => sub {
     {
         package Kestra::Test::Broken;

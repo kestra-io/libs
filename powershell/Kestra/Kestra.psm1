@@ -56,12 +56,13 @@ function ConvertTo-KestraValue {
     if ($Value -is [System.Collections.IDictionary] -or $Value -is [System.Management.Automation.PSCustomObject]) {
         $map = ConvertTo-KestraMap -InputObject $Value -What 'A map'
         $copy = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
-        foreach ($key in $map.Keys) {
-            $text = [string]$key
+        # GetEnumerator, since $map[$key] with an [int] key reads an [ordered] dictionary by position.
+        foreach ($entry in $map.GetEnumerator()) {
+            $text = [string]$entry.Key
             if ($copy.Contains($text)) {
                 throw [System.ArgumentException]::new("This value cannot be sent to Kestra as JSON: two keys read as '$text'.")
             }
-            $copy[$text] = ConvertTo-KestraValue -Value $map[$key] -Depth ($Depth + 1)
+            $copy[$text] = ConvertTo-KestraValue -Value $entry.Value -Depth ($Depth + 1)
         }
         return $copy
     }
@@ -82,8 +83,9 @@ function ConvertTo-KestraTag {
     $stringTags = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
     if ($null -ne $Tags) {
         $map = ConvertTo-KestraMap -InputObject $Tags -What 'Tags'
-        foreach ($key in $map.Keys) {
-            $tag = $map[$key]
+        foreach ($entry in $map.GetEnumerator()) {
+            $key = $entry.Key
+            $tag = $entry.Value
             if ($null -eq $tag -or ($tag -isnot [string] -and $tag -is [System.Collections.IEnumerable]) -or $tag -is [System.Management.Automation.PSCustomObject]) {
                 throw [System.ArgumentException]::new("Metric '$Name' tag '$key' must be a single value, for example @{ env = 'prod' }.")
             }
@@ -201,11 +203,12 @@ function Send-KestraAsset {
 
     process {
         $map = ConvertTo-KestraMap -InputObject $Assets -What 'Assets'
-        foreach ($key in $map.Keys) {
+        foreach ($entry in $map.GetEnumerator()) {
+            $key = $entry.Key
             if ($key -cne 'inputs' -and $key -cne 'outputs') {
                 throw [System.ArgumentException]::new("Assets hold only inputs and outputs, not '$key'.")
             }
-            $list = $map[$key]
+            $list = $entry.Value
             if ($list -isnot [System.Collections.IList] -or $list -is [System.Collections.IDictionary]) {
                 throw [System.ArgumentException]::new("Asset $key must be an array, for example @(@{ id = 'sales.orders'; type = 'TABLE' }).")
             }
