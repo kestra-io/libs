@@ -187,6 +187,16 @@ func appendItems(b *strings.Builder, n, depth int, items *int, appendItem func(i
 }
 
 func lessKey(a, b reflect.Value) bool {
+	// Keys of a map[any]any are interfaces: compare what they hold, ordered by type first as fmt does.
+	if a.Kind() == reflect.Interface {
+		a, b = a.Elem(), b.Elem()
+		if !a.IsValid() || !b.IsValid() {
+			return !a.IsValid() && b.IsValid()
+		}
+		if a.Type() != b.Type() {
+			return a.Type().String() < b.Type().String()
+		}
+	}
 	switch a.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return a.Int() < b.Int()

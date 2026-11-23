@@ -38,7 +38,7 @@ func Assets(assets map[string]any) error {
 		if key != "inputs" && key != "outputs" {
 			return fmt.Errorf("kestra: assets hold only inputs and outputs, not %q", key)
 		}
-		if kind := reflect.ValueOf(value).Kind(); kind != reflect.Slice && kind != reflect.Array {
+		if rv := reflect.ValueOf(value); rv.Kind() != reflect.Array && (rv.Kind() != reflect.Slice || rv.IsNil()) {
 			return fmt.Errorf(`kestra: asset %s must be a list, for example []map[string]any{{"id": "sales.orders", "type": "TABLE"}}`, key)
 		}
 	}
@@ -106,7 +106,7 @@ func encodeError(err error) error {
 	var typeErr *json.UnsupportedTypeError
 	switch {
 	case errors.As(err, &valueErr) && (valueErr.Str == "NaN" || valueErr.Str == "+Inf" || valueErr.Str == "-Inf"):
-		return errors.New("kestra: this value cannot be sent to Kestra as JSON: replace NaN and Inf with nil")
+		return errors.New("kestra: this value cannot be sent to Kestra as JSON: replace NaN and Inf with a finite number, or with nil in an any or *float64")
 	case errors.As(err, &valueErr):
 		return errors.New("kestra: this value cannot be sent to Kestra as JSON: it contains itself")
 	case errors.As(err, &typeErr):

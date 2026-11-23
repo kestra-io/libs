@@ -337,7 +337,7 @@ class Kestra {
                 try {
                     error.printStackTrace(new PrintWriter(trace))
                     builder.append('\n').append(trace.toString().trim())
-                } catch (Throwable ignored) {
+                } catch (Exception | AssertionError | StackOverflowError ignored) {
                     builder.append('\n').append(error.getClass().name).append(': [FAILED getMessage()]')
                 }
             }
@@ -349,7 +349,7 @@ class Kestra {
                 // A toString() can return null or throw an Error, as a Groovy assert does, and lists that contain each other overflow the stack.
                 String text = String.valueOf(value)
                 return text == null ? 'null' : text
-            } catch (Throwable ignored) {
+            } catch (Exception | AssertionError | StackOverflowError ignored) {
                 return '[FAILED toString()]'
             }
         }

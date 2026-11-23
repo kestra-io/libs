@@ -83,9 +83,9 @@ func TestValuesJSONCannotEncodeFailWithAPlainSentence(t *testing.T) {
 	self := map[string]any{}
 	self["self"] = self
 	for value, want := range map[string]any{
-		"replace NaN and Inf with nil": math.NaN(),
-		"chan int is not a map, slice": make(chan int),
-		"it contains itself":           self,
+		"replace NaN and Inf with a finite number": math.NaN(),
+		"chan int is not a map, slice":             make(chan int),
+		"it contains itself":                       self,
 	} {
 		err := Outputs(map[string]any{"x": want})
 		if err == nil || !strings.Contains(err.Error(), "cannot be sent to Kestra as JSON: "+value) || strings.Contains(err.Error(), "json:") {
@@ -117,6 +117,7 @@ func TestAssetsMustBeListsOfInputsOrOutputs(t *testing.T) {
 		`assets hold only inputs and outputs, not "output"`: {"output": []any{}},
 		"asset inputs must be a list":                       {"inputs": map[string]any{"id": "raw.orders"}},
 		"asset outputs must be a list":                      {"outputs": nil},
+		"asset inputs must be a list, for example":          {"inputs": []map[string]any(nil)},
 	} {
 		if err := Assets(assets); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("got %v, want an error containing %q", err, want)
@@ -268,6 +269,14 @@ func TestLoggingANamedByteSliceShowsItsText(t *testing.T) {
 	want := `::{"logs":[{"level":"INFO","message":"x body=\"{\\\"a\\\":1}\""}]}::`
 	if len(lines) != 1 || lines[0] != want {
 		t.Fatalf("got %q, want %q", lines, want)
+	}
+}
+
+func TestLoggingAMapWithInterfaceKeysSortsNumbersAsNumbers(t *testing.T) {
+	lines := capture(t, func() { Logger().Info("x", "m", map[any]any{10: "b", 9: "a", "k": "c"}) })
+
+	if len(lines) != 1 || !strings.Contains(lines[0], `m=\"map[9:a 10:b k:c]\"`) {
+		t.Fatalf("got %q", lines)
 	}
 }
 
