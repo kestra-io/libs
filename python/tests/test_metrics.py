@@ -1,4 +1,7 @@
+import threading
 import time
+from datetime import date, datetime, timezone
+from datetime import time as dt_time
 
 import pytest
 from kestra import Kestra
@@ -411,18 +414,86 @@ def test_outputs_non_finite_rejected():
         Kestra.outputs({"inf_val": float("inf")})
 
 
-def test_send_flushes_stdout(monkeypatch):
-    """Test that _send calls print with flush=True."""
-    printed = []
-
-    def mock_print(*args, **kwargs):
-        printed.append((args, kwargs))
-
-    monkeypatch.setattr("builtins.print", mock_print)
+def test_send_writes_one_flushed_line(monkeypatch):
+    stdout = RecordingStdout()
+    monkeypatch.setattr("sys.stdout", stdout)
 
     Kestra._send({"test": "value"})
 
-    assert len(printed) == 1
-    args, kwargs = printed[0]
-    assert args == ('::{"test": "value"}::',)
-    assert kwargs.get("flush") is True
+    assert stdout.calls == [("write", '::{"test": "value"}::\n'), ("flush",)]
+
+
+class RecordingStdout:
+    def __init__(self):
+        self.calls = []
+
+    def write(self, text):
+        self.calls.append(("write", text))
+        # Yield to other threads, as a write to a real pipe can.
+        time.sleep(0.0001)
+
+    def flush(self):
+        self.calls.append(("flush",))
+
+
+def test_lines_from_several_threads_never_interleave(monkeypatch):
+    stdout = RecordingStdout()
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    def send():
+        for _ in range(20):
+            Kestra.outputs({"key": "value"})
+
+    threads = [threading.Thread(target=send) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    text = "".join(call[1] for call in stdout.calls if call[0] == "write")
+    assert text.splitlines() == ['::{"outputs": {"key": "value"}}::'] * 160
+
+
+def test_timer_checks_name_and_tags_before_running_the_callable():
+    calls = []
+
+    with pytest.raises(ValueError, match="Metric name must be a non-empty string"):
+        Kestra.timer("", lambda: calls.append("ran"))
+
+    with pytest.raises(ValueError, match="must be a single value"):
+        Kestra.timer("timed", lambda: calls.append("ran"), {"list": [1]})
+
+    assert calls == []
+
+
+def test_outputs_send_dates_and_times_as_iso_text(monkeypatch):
+    lines = []
+    monkeypatch.setattr(Kestra, "_send", lambda map_: lines.append(Kestra.format(map_)))
+
+    Kestra.outputs(
+        {
+            "date": date(2024, 1, 2),
+            "local": datetime(2024, 1, 2, 3, 4, 5),
+            "utc": datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
+            "time": dt_time(3, 4, 5),
+        }
+    )
+
+    assert lines == [
+        '::{"outputs": {"date": "2024-01-02", "local": "2024-01-02T03:04:05", '
+        '"utc": "2024-01-02T03:04:05+00:00", "time": "03:04:05"}}::'
+    ]
+
+
+def test_outputs_that_contain_themselves_are_rejected():
+    value = []
+    value.append(value)
+
+    with pytest.raises(ValueError, match="it contains itself"):
+        Kestra.outputs({"loop": value})
+
+
+@pytest.mark.parametrize("outputs", [{"set": {1}}, {(1, 2): "tuple key"}, {"obj": object()}])
+def test_outputs_json_cannot_hold_are_rejected_with_a_plain_sentence(outputs):
+    with pytest.raises(TypeError, match="cannot be sent to Kestra as JSON: pass str"):
+        Kestra.outputs(outputs)

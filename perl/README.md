@@ -40,14 +40,14 @@ tasks:
 
 | Call | Result in Kestra |
 |------|------------------|
-| `Kestra->outputs(\%outputs)` | Task outputs under `outputs.<task>.vars` |
-| `Kestra->assets({ inputs => [...], outputs => [...] })` | Input and output assets of the task |
+| `Kestra->outputs(\%outputs)` | Task outputs under `outputs.<task>.vars`. An empty hash sends nothing |
+| `Kestra->assets({ inputs => [...], outputs => [...] })` | Input and output assets of the task. Both are optional array references, and an empty hash sends nothing |
 | `Kestra->counter($name, $value, \%tags)` | Counter metric |
 | `Kestra->gauge($name, $value, \%tags)` | Gauge metric |
-| `Kestra->timer($name, $seconds, \%tags)` or `Kestra->timer($name, sub { ... }, \%tags)` | Timer metric. A code reference is timed and its result returned |
+| `Kestra->timer($name, $seconds, \%tags)` or `Kestra->timer($name, sub { ... }, \%tags)` | Timer metric. A code reference is timed and its result returned. The name and tags are checked before the code runs, and no metric is sent if it dies |
 | `Kestra->logger->trace/debug/info/warn/error/fatal(@message)` | Log line at that level. Arguments are joined like `print` joins them, and `fatal` is sent as ERROR |
-| `Kestra->context($path)` | The execution context as a hash reference, for example `Kestra->context->{labels}`. Needs `executionContext: true` on the task. Without `$path`, falls back to the base64 `KESTRA_CONTEXT` variable. A `$path` that does not exist dies |
+| `Kestra->context($path)` | The execution context as a hash reference, for example `Kestra->context->{labels}`. Needs `executionContext: true` on the task. An empty `$path` counts as none. Without `$path`, a missing file falls back to the base64 `KESTRA_CONTEXT` variable. A `$path` that does not exist, a directory or an unreadable file dies |
 
-Tags are optional and sent as strings, and boolean tags as `"true"` or `"false"`. Byte strings are read as UTF-8, so a script without `use utf8` still sends `café`. Invalid UTF-8 in a log message becomes U+FFFD, and in outputs it dies with a plain message.
+Tags are optional and sent as strings, and boolean tags as `"true"` or `"false"`. Two tag names that read as the same text die. Byte strings are read as UTF-8, so a script without `use utf8` still sends `café`. Invalid UTF-8 in a log message becomes U+FFFD, and in outputs it dies with a plain message.
 
 Outputs use `JSON::PP` rules. Whether a scalar is sent as a number or a string depends on how Perl last used it and on the Perl version: `'42'` is a string, so write `0 + $value` to send a number. Floats keep 15 significant digits. Booleans are `JSON::PP::true`, `JSON::PP::false`, `\1` or `\0`. From Perl 5.36, the result of a comparison such as `$count > 0` is sent as a boolean too. Before 5.36 it is sent as `1` or `""`.

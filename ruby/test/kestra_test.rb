@@ -31,13 +31,28 @@ class KestraTest < Minitest::Test
   end
 
   def test_values_json_cannot_encode_fail_with_a_plain_sentence
-    error = assert_raises(ArgumentError) { Kestra.outputs(score: Float::NAN) }
-    assert_match(/cannot be sent to Kestra as JSON.*Replace NaN and Infinity with nil/, error.message)
-    assert_raises(ArgumentError) { Kestra.outputs(body: "bad \xff") }
+    looped = [1]
+    looped << looped
+    {
+      { score: Float::NAN } => "replace NaN and Infinity with nil.",
+      { body: "bad \xff" } => "make strings valid UTF-8, for example with String#scrub.",
+      { looped: looped } => "it is nested more than 100 levels deep or contains itself.",
+      { 1 => "a", "1" => "b" } => "two keys read as '1'.",
+      { nested: { a: 1, "a" => 2 } } => "two keys read as 'a'."
+    }.each do |outputs, message|
+      error = assert_raises(ArgumentError) { Kestra.outputs(outputs) }
+      assert_equal "This value cannot be sent to Kestra as JSON: #{message}", error.message
+    end
   end
 
-  def test_outputs_must_be_a_non_empty_hash
-    assert_raises(ArgumentError) { Kestra.outputs({}) }
+  def test_times_are_sent_as_iso_8601
+    assert_equal ['::{"outputs":{"at":"1970-01-01T00:00:00Z","precise":"1970-01-01T00:00:00.500000Z"}}::'],
+                 emitted { Kestra.outputs(at: Time.at(0).utc, precise: Time.at(0.5).utc) }
+  end
+
+  def test_empty_outputs_and_assets_send_nothing
+    assert_empty emitted { Kestra.outputs({}) }
+    assert_empty emitted { Kestra.assets({}) }
     assert_raises(ArgumentError) { Kestra.outputs([1, 2]) }
   end
 
@@ -89,6 +104,23 @@ class KestraTest < Minitest::Test
                   %(::{"logs":[{"level":"INFO","message":"caf\u00e9"}]}::)], lines
   end
 
+  def test_logging_a_value_that_contains_itself_or_cannot_be_inspected_never_fails
+    looped = [1]
+    looped << looped
+    raising = Object.new
+    raising.define_singleton_method(:inspect) { raise "boom" }
+    not_text = Object.new
+    not_text.define_singleton_method(:inspect) { 42 }
+    lines = emitted do
+      Kestra.logger.info(looped)
+      Kestra.logger.info(raising)
+      Kestra.logger.info(not_text)
+      Kestra.logger.info(nil)
+    end
+
+    assert_equal ["[1, [...]]", "#<Object>", "#<Object>", "nil"], lines.map { |line| payload(line)["logs"].first["message"] }
+  end
+
   def test_logger_follows_stdout_when_it_is_replaced
     Kestra.logger
     assert_equal ['::{"logs":[{"level":"INFO","message":"later"}]}::'], emitted { Kestra.logger.info("later") }
@@ -102,8 +134,28 @@ class KestraTest < Minitest::Test
 
     assert_equal ['::{"metrics":[{"name":"ratio","type":"gauge","value":0.25,"tags":{"shard":"2","primary":"true"}}]}::',
                   '::{"metrics":[{"name":"price","type":"gauge","value":1.5,"tags":{}}]}::'], lines
+    assert_equal ['::{"metrics":[{"name":"rows","type":"counter","value":1,"tags":{"window":"1..3"}}]}::'],
+                 emitted { Kestra.counter("rows", 1, tags: { window: 1..3 }) }
     assert_raises(ArgumentError) { Kestra.gauge("queue", 1, tags: { a: [1] }) }
     assert_raises(ArgumentError) { Kestra.gauge("queue", 1, tags: { a: nil }) }
+  end
+
+  def test_two_tags_that_read_as_the_same_name_fail
+    error = assert_raises(ArgumentError) { Kestra.counter("rows", 1, tags: { env: "a", "env" => "b" }) }
+    assert_equal "Metric 'rows' has two tags named 'env'.", error.message
+    assert_raises(ArgumentError) { Kestra.counter("rows", 1, tags: { 1 => "a", "1" => "b" }) }
+  end
+
+  def test_timer_checks_name_and_tags_before_running_the_block
+    ran = false
+    assert_raises(ArgumentError) { Kestra.timer("") { ran = true } }
+    assert_raises(ArgumentError) { Kestra.timer("fit", tags: { env: nil }) { ran = true } }
+    refute ran
+  end
+
+  def test_timer_sends_nothing_when_the_block_raises
+    lines = emitted { assert_raises(RuntimeError) { Kestra.timer("fit") { raise "boom" } } }
+    assert_empty lines
   end
 
   def test_timer_is_sent_when_the_block_returns_early
@@ -132,7 +184,14 @@ class KestraTest < Minitest::Test
 
     assert_equal ['::{"assets":{"inputs":[{"id":"raw.orders"}],"outputs":[{"id":"sales.orders","type":"TABLE","metadata":{"owner":"team_a"}}]}}::'],
                  emitted { Kestra.assets(assets) }
-    assert_raises(ArgumentError) { Kestra.assets({}) }
+  end
+
+  def test_assets_must_be_arrays_of_inputs_or_outputs
+    error = assert_raises(ArgumentError) { Kestra.assets(output: []) }
+    assert_equal "Assets hold only inputs and outputs, not 'output'.", error.message
+    error = assert_raises(ArgumentError) { Kestra.assets(inputs: { id: "raw.orders" }) }
+    assert_match(/\AAsset inputs must be an Array/, error.message)
+    assert_equal ['::{"assets":{"inputs":[]}}::'], emitted { Kestra.assets("inputs" => []) }
   end
 
   def with_context
@@ -193,12 +252,32 @@ class KestraTest < Minitest::Test
 
   def test_context_that_is_not_an_object_names_the_source
     with_context do |file|
-      ["", "null", "[1]", "{"].each do |content|
+      { "" => "is not valid JSON", "{" => "is not valid JSON", "null" => "is not a JSON object", "[1]" => "is not a JSON object" }.each do |content, message|
         File.write(file, content)
         error = assert_raises(JSON::ParserError) { Kestra.context(file) }
-        assert_includes error.message, file
+        assert_includes error.message, "#{file} #{message}"
       end
     end
+  end
+
+  def test_invalid_base64_and_a_directory_fail_with_their_own_message
+    with_context do |_file, dir|
+      ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = File.join(dir, "missing.json")
+      ENV["KESTRA_CONTEXT"] = "not base64!"
+      error = assert_raises(ArgumentError) { Kestra.context }
+      assert_equal "The KESTRA_CONTEXT environment variable is not valid base64.", error.message
+
+      ENV["KESTRA_CONTEXT"] = ['{"vars":{"n":42}}'].pack("m")
+      assert_equal 42, Kestra.context["vars"]["n"]
+
+      ENV["KESTRA_EXECUTION_CONTEXT_FILE"] = dir
+      Kestra.instance_variable_set(:@context_json, nil)
+      assert_raises(Errno::EISDIR) { Kestra.context }
+    end
+  end
+
+  def test_empty_path_means_the_default_context
+    with_context { assert_equal "prod", Kestra.context("")["labels"]["env"] }
   end
 
   def test_context_fails_clearly_outside_kestra

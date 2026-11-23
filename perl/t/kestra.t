@@ -86,9 +86,9 @@ subtest 'multi-line strings, Java line terminators and non-ASCII stay on one ASC
     like(Kestra->format({ outputs => { bytes => $bytes } }), qr/caf\\u00e9/, 'format reads them the same way');
 };
 
-subtest 'outputs must be a non-empty hash reference' => sub {
-    dies_with(sub { Kestra->outputs({}) }, 'Outputs must be a non-empty hash reference');
-    dies_with(sub { Kestra->outputs([1]) }, 'Outputs must be a non-empty hash reference');
+subtest 'outputs must be a hash reference, and an empty one sends nothing' => sub {
+    is(capture(sub { Kestra->outputs({}) }), '');
+    dies_with(sub { Kestra->outputs([1]) }, 'Outputs must be a hash reference');
 };
 
 subtest 'values JSON cannot carry fail with a plain sentence' => sub {
@@ -157,6 +157,9 @@ subtest 'metrics reject invalid input' => sub {
     dies_with(sub { Kestra->counter('rows', 1, ['prod']) }, "Metric 'rows' tags must be a hash reference");
     dies_with(sub { Kestra->counter('rows', 1, { env => undef }) }, "Metric 'rows' tag 'env' must be a single value");
     dies_with(sub { Kestra->counter('rows', 1, { env => ['a'] }) }, "Metric 'rows' tag 'env' must be a single value");
+    my $characters = "caf\x{e9}";
+    utf8::upgrade($characters);
+    dies_with(sub { Kestra->counter('rows', 1, { "caf\xc3\xa9" => 1, $characters => 2 }) }, "Metric 'rows' has two tags named 'caf");
     dies_with(sub { Kestra->timer('fetch', 'abc') }, "Metric 'fetch' value must be a finite number.");
 };
 
@@ -171,6 +174,13 @@ subtest 'timer times a code reference and returns its result' => sub {
     my ($metric) = map { $_->{metrics}[0] } lines($out);
     is_deeply([@$metric{qw(name type tags)}], ['fit', 'timer', { env => 'qa' }]);
     ok($metric->{value} > 0.04 && $metric->{value} < 5, "timer value in seconds: $metric->{value}");
+};
+
+subtest 'timer checks the name and tags before running the code' => sub {
+    my $is_run = 0;
+    dies_with(sub { Kestra->timer('fit', sub { $is_run = 1 }, ['prod']) }, "Metric 'fit' tags must be a hash reference");
+    dies_with(sub { Kestra->timer('', sub { $is_run = 1 }) }, 'Metric name must be a non-empty string.');
+    is($is_run, 0);
 };
 
 subtest 'timer sends nothing when the code dies' => sub {
@@ -189,6 +199,29 @@ subtest 'logger maps Log4perl levels to Kestra levels and joins arguments' => su
     }));
     is_deeply([map { [$_->{logs}[0]{level}, $_->{logs}[0]{message}] } @lines],
         [[TRACE => 'trace'], [DEBUG => 'debug'], [INFO => 'info'], [WARN => 'warn'], [ERROR => 'error'], [ERROR => 'fatal'], [INFO => 'rows: 3 done']]);
+};
+
+subtest 'logging $@ keeps it for a rethrow' => sub {
+    eval { die "orig\n" };
+    my ($line) = lines(capture(sub { Kestra->logger->error('failed: ', $@) }));
+    is($line->{logs}[0]{message}, "failed: orig\n");
+    is($@, "orig\n");
+    eval { die "caf\xc3\xa9\n" };
+    capture(sub { Kestra->logger->error($@) });
+    is($@, "caf\xc3\xa9\n", 'also after decoding UTF-8 bytes');
+};
+
+subtest 'logger never fails on a value that contains itself or cannot be shown as text' => sub {
+    {
+        package Kestra::Test::Broken;
+        use overload '""' => sub { die "no text\n" };
+    }
+    my $hash = {};
+    $hash->{self} = $hash;
+    my $array = [];
+    push @$array, $array;
+    my @lines = lines(capture(sub { Kestra->logger->info('values: ', $hash, ' ', $array, ' ', bless({}, 'Kestra::Test::Broken')) }));
+    like($lines[0]{logs}[0]{message}, qr/^values: HASH\(0x[0-9a-f]+\) ARRAY\(0x[0-9a-f]+\) <Kestra::Test::Broken>$/);
 };
 
 subtest 'logger reads UTF-8 bytes, replaces what JSON cannot carry and escapes terminators' => sub {
@@ -221,7 +254,14 @@ subtest 'assets are sent as given' => sub {
     my $out = capture(sub { Kestra->assets($assets) });
     is_deeply([lines($out)], [{ assets => $assets }]);
     like($out, qr/"metadata":\{\}/, 'empty metadata is an object');
-    dies_with(sub { Kestra->assets({}) }, 'Assets must be a non-empty hash reference');
+    is(capture(sub { Kestra->assets({ outputs => [] }) }), qq(::{"assets":{"outputs":[]}}::\n), 'an empty list is sent');
+    is(capture(sub { Kestra->assets({}) }), '', 'no assets send nothing');
+};
+
+subtest 'assets hold only inputs and outputs lists' => sub {
+    dies_with(sub { Kestra->assets([1]) }, 'Assets must be a hash reference');
+    dies_with(sub { Kestra->assets({ output => [] }) }, "Assets hold only inputs and outputs, not 'output'.");
+    dies_with(sub { Kestra->assets({ inputs => { id => 'raw.orders' } }) }, 'Asset inputs must be an array reference');
 };
 
 subtest 'context is read from the default file once and each call returns a new hash' => sub {
@@ -239,6 +279,15 @@ subtest 'lookup order: file, then KESTRA_EXECUTION_CONTEXT_FILE over the default
     is((run_perl("chdir '$dir'; $print", env => { KESTRA_EXECUTION_CONTEXT_FILE => "$other/.kestra-execution-context.json" }))[0], 'env-file');
     is((run_perl("chdir '$dir'; $print", env => { KESTRA_EXECUTION_CONTEXT_FILE => '' }))[0], 'default', 'an empty variable means the default file');
     is((run_perl($print, env => { KESTRA_CONTEXT => $env }))[0], 'from-env');
+    is((run_perl("chdir '$dir'; print Kestra->context('')->{execution}{id};"))[0], 'default', 'an empty path means the default lookup');
+};
+
+subtest 'only a missing file falls back: a directory fails with its read error' => sub {
+    my $dir = tempdir(CLEANUP => 1);
+    my $env = encode_base64('{"execution":{"id":"from-env"}}', '');
+    my (undef, $err, $exit) = run_perl('Kestra->context', env => { KESTRA_EXECUTION_CONTEXT_FILE => $dir, KESTRA_CONTEXT => $env });
+    isnt($exit, 0);
+    like($err, qr/Kestra execution context file '\Q$dir\E' cannot be read: Is a directory\./);
 };
 
 subtest 'an explicit path is read as given and never cached as the default context' => sub {
@@ -256,12 +305,11 @@ subtest 'an explicit path never falls back to the variable' => sub {
     unlike($err, qr/KESTRA_CONTEXT/);
 };
 
-subtest 'context that is not a JSON object names the source' => sub {
-    for my $json ('[1, 2]', '{oops') {
-        my $dir = context_dir($json);
-        like((run_perl("chdir '$dir'; Kestra->context"))[1], qr/The execution context in \.kestra-execution-context\.json is not a JSON object\./, $json);
-    }
+subtest 'context that is not base64, not JSON or not an object fails with its own message' => sub {
+    like((run_perl("chdir '${\context_dir('[1, 2]')}'; Kestra->context"))[1], qr/The execution context in \.kestra-execution-context\.json is not a JSON object\./);
+    like((run_perl("chdir '${\context_dir('{oops')}'; Kestra->context"))[1], qr/The execution context in \.kestra-execution-context\.json is not valid JSON\./);
     like((run_perl('Kestra->context', env => { KESTRA_CONTEXT => encode_base64('[]', '') }))[1], qr/The execution context in KESTRA_CONTEXT is not a JSON object\./);
+    like((run_perl('Kestra->context', env => { KESTRA_CONTEXT => 'not base64!' }))[1], qr/The KESTRA_CONTEXT environment variable is not valid base64\./);
 };
 
 subtest 'context fails clearly outside Kestra' => sub {

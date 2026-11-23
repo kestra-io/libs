@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -22,19 +23,27 @@ var (
 	nextLineEscaped = []byte(`\u0085`)
 )
 
-// Outputs sends task outputs, readable in later tasks as `outputs.<task>.vars.<key>`.
+// Outputs sends task outputs, readable in later tasks as `outputs.<task>.vars.<key>`. Empty outputs send nothing.
 func Outputs(outputs map[string]any) error {
 	if len(outputs) == 0 {
-		return errors.New("kestra: outputs must contain at least one key, for example map[string]any{\"rows\": 42}")
+		return nil
 	}
 	return send(map[string]any{"outputs": outputs})
 }
 
-// Assets declares the task's input and output assets,
-// for example map[string]any{"outputs": []map[string]any{{"id": "sales.orders", "type": "TABLE"}}}.
+// Assets declares the task's input and output assets, each a list,
+// for example map[string]any{"outputs": []map[string]any{{"id": "sales.orders", "type": "TABLE"}}}. Empty assets send nothing.
 func Assets(assets map[string]any) error {
+	for key, value := range assets {
+		if key != "inputs" && key != "outputs" {
+			return fmt.Errorf("kestra: assets hold only inputs and outputs, not %q", key)
+		}
+		if rv := reflect.ValueOf(value); rv.Kind() != reflect.Array && (rv.Kind() != reflect.Slice || rv.IsNil()) {
+			return fmt.Errorf(`kestra: asset %s must be a list, for example []map[string]any{{"id": "sales.orders", "type": "TABLE"}}`, key)
+		}
+	}
 	if len(assets) == 0 {
-		return errors.New("kestra: assets must contain inputs or outputs")
+		return nil
 	}
 	return send(map[string]any{"assets": assets})
 }
@@ -80,7 +89,7 @@ func send(message any) error {
 	encoder := json.NewEncoder(&buf)
 	encoder.SetEscapeHTML(false)
 	if err := encoder.Encode(message); err != nil {
-		return fmt.Errorf("kestra: %w", err)
+		return encodeError(err)
 	}
 	line := bytes.ReplaceAll(bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nextLine, nextLineEscaped)
 	line = append(line, "::\n"...)
@@ -90,4 +99,18 @@ func send(message any) error {
 	defer mu.Unlock()
 	_, err := stdout.Write(line)
 	return err
+}
+
+func encodeError(err error) error {
+	var valueErr *json.UnsupportedValueError
+	var typeErr *json.UnsupportedTypeError
+	switch {
+	case errors.As(err, &valueErr) && (valueErr.Str == "NaN" || valueErr.Str == "+Inf" || valueErr.Str == "-Inf"):
+		return errors.New("kestra: this value cannot be sent to Kestra as JSON: replace NaN and Inf with a finite number, or with nil in an any or *float64")
+	case errors.As(err, &valueErr):
+		return errors.New("kestra: this value cannot be sent to Kestra as JSON: it contains itself")
+	case errors.As(err, &typeErr):
+		return fmt.Errorf("kestra: this value cannot be sent to Kestra as JSON: %s is not a map, slice, string, number, bool or time, convert it first", typeErr.Type)
+	}
+	return fmt.Errorf("kestra: this value cannot be sent to Kestra as JSON: %w", err)
 }

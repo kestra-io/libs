@@ -73,14 +73,36 @@ func TestLoadContextDoesNotFallBackForAnExplicitPath(t *testing.T) {
 }
 
 func TestContextThatIsNotAnObjectNamesTheSource(t *testing.T) {
-	for _, content := range []string{"", "null", "[1]", "{"} {
+	for content, want := range map[string]string{"": "is not valid JSON", "{": "is not valid JSON", "null": "is JSON but not an object", "[1]": "is JSON but not an object"} {
 		file := filepath.Join(t.TempDir(), "context.json")
 		must(t, os.WriteFile(file, []byte(content), 0o600))
 
 		_, err := LoadContext(file)
-		if err == nil || !strings.Contains(err.Error(), file) {
+		if err == nil || !strings.Contains(err.Error(), file+" "+want) {
 			t.Errorf("content %q: got %v, want an error naming %s", content, err, file)
 		}
+	}
+
+	withContextFile(t)
+	t.Setenv("KESTRA_EXECUTION_CONTEXT_FILE", filepath.Join(t.TempDir(), "missing.json"))
+	for encoded, want := range map[string]string{
+		"not base64!": "KESTRA_CONTEXT environment variable is not valid base64",
+		base64.StdEncoding.EncodeToString([]byte("[1]")): "KESTRA_CONTEXT is JSON but not an object",
+	} {
+		t.Setenv("KESTRA_CONTEXT", encoded)
+		if _, err := LoadContext(""); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("KESTRA_CONTEXT %q: got %v, want %q", encoded, err, want)
+		}
+	}
+}
+
+func TestADirectoryFailsInsteadOfFallingBack(t *testing.T) {
+	withContextFile(t)
+	t.Setenv("KESTRA_EXECUTION_CONTEXT_FILE", t.TempDir())
+	t.Setenv("KESTRA_CONTEXT", base64.StdEncoding.EncodeToString([]byte(`{"vars":{"n":42}}`)))
+
+	if _, err := Context(); err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("got %v, want a read error", err)
 	}
 }
 

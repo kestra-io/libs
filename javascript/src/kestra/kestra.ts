@@ -16,7 +16,23 @@ let contextJson: string | undefined;
  * @returns The formatted string.
  */
 Kestra.format = (map: Record<string, any>): string => {
-  const text: string = JSON.stringify(map).replace(/[\u0085\u2028\u2029]/g, (match: string) => {
+  let json: string;
+  try {
+    json = JSON.stringify(map);
+  } catch (error) {
+    // JSON.stringify throws a TypeError. Anything else came from a toJSON method and is rethrown as is.
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+    const isCircular = /circular/i.test(error.message);
+    throw new TypeError(
+      isCircular
+        ? 'This value cannot be sent to Kestra as JSON: it contains itself, pass a copy without the loop.'
+        : 'This value cannot be sent to Kestra as JSON: pass strings, numbers, booleans, null, arrays, objects or dates.',
+      { cause: error }
+    );
+  }
+  const text: string = json.replace(/[\u0085\u2028\u2029]/g, (match: string) => {
     return '\\u' + match.charCodeAt(0).toString(16).padStart(4, '0');
   });
   return '::' + text + '::';
@@ -46,11 +62,24 @@ Kestra._metrics = (name: string, type: string, value: any, tags: any) => {
         name: name,
         type: type,
         value: value,
-        tags: tags || {},
+        tags: stringTags(tags),
       },
     ],
   });
 };
+
+// Kestra drops a metric whose tag values are not strings.
+function stringTags(tags: any): any {
+  if (tags === null || typeof tags !== 'object' || Array.isArray(tags)) {
+    return tags || {};
+  }
+  return Object.fromEntries(
+    Object.entries(tags).map(([key, value]) => [
+      key,
+      ['number', 'boolean', 'bigint'].includes(typeof value) ? String(value) : value,
+    ])
+  );
+}
 
 Kestra.outputs = (outputs: any) => {
   Kestra._send({
@@ -79,22 +108,20 @@ Kestra.counter = (name: string, value: any, tags: any) => {
  * Measures the duration of a timer and sends the metric.
  *
  * @param name - The name of the timer.
- * @param duration - The duration in seconds or a function to measure the duration.
+ * @param duration - The duration in seconds, or a function that receives a callback to call when the timed work ends.
  * @param tags - Additional metadata tags for the timer.
+ * @returns What the function returns, or undefined when a duration is given.
  */
-Kestra.timer = (name: string, duration: number | ((func: () => void) => void), tags: any) => {
-  // Check if duration is a function to execute for measuring time
+Kestra.timer = <T>(name: string, duration: number | ((callback: () => void) => T), tags?: any): T | undefined => {
   if (typeof duration === 'function') {
     const start = new Date();
-    // Execute the function and calculate elapsed time
-    duration(() => {
+    return duration(() => {
       const elapsedTime = (new Date().getTime() - start.getTime()) / 1000;
       Kestra._metrics(name, 'timer', elapsedTime, tags);
     });
-  } else {
-    // Directly use the provided duration value
-    Kestra._metrics(name, 'timer', duration, tags);
   }
+  Kestra._metrics(name, 'timer', duration, tags);
+  return undefined;
 };
 
 /**

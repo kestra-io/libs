@@ -173,6 +173,13 @@ Base.string(::Sneaky) = Unprintable()
         @test length(logs) == 9
     end
 
+    @testset "a log call never fails on a value that contains itself" begin
+        loop = Any[]
+        push!(loop, loop)
+        line = capture(() -> with_logger(() -> @info(loop), Kestra.logger()))
+        @test line == "::{\"logs\":[{\"level\":\"INFO\",\"message\":\"Any[Any[#= circular reference @-1 =#]]\"}]}::\n"
+    end
+
     @testset "context" begin
         json = "{\"labels\":{\"team\":\"caf\\u00e9\",\"emoji\":\"\\ud83d\\ude00\"},\"inputs\":{\"text\":\"a\\nb\",\"list\":[1,null,2.5,true]}," *
             "\"vars\":{\"n\":-42,\"e\":1.5e3,\"huge\":1e400,\"big\":123456789012345678901234567890,\"empty\":{}}}"
