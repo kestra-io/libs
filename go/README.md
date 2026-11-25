@@ -6,13 +6,13 @@ Send outputs, metrics, logs and assets from Go script tasks to Kestra. Each call
 
 ```bash
 go mod init flow
-go get github.com/kestra-io/libs/go@main
+go get github.com/kestra-io/libs/go/v2@main
 go mod tidy
 ```
 
 The `go` tool writes progress such as `go: downloading ...` to stderr, which Kestra logs as ERROR, so the flow below redirects it with `2>&1`.
 
-Each release `vX.Y.Z` also tags `go/vX.Y.Z`, so from the first release that includes this module, pin it with `go get github.com/kestra-io/libs/go@vX.Y.Z` instead of `main`. A pinned version cannot change when `main` does.
+Each release `vX.Y.Z` also tags `go/vX.Y.Z`, so from the first release that includes this module, pin it with `go get github.com/kestra-io/libs/go/v2@vX.Y.Z` instead of `main`. A pinned version cannot change when `main` does.
 
 ## Usage
 
@@ -25,7 +25,7 @@ tasks:
     type: io.kestra.plugin.scripts.go.Script
     beforeCommands:
       - go mod init flow 2>&1
-      - go get github.com/kestra-io/libs/go@main 2>&1
+      - go get github.com/kestra-io/libs/go/v2@main 2>&1
       - go mod tidy 2>&1
     script: |
       package main
@@ -33,7 +33,7 @@ tasks:
       import (
           "time"
 
-          "github.com/kestra-io/libs/go/kestra"
+          "github.com/kestra-io/libs/go/v2/kestra"
       )
 
       func main() {
