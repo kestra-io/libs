@@ -4,7 +4,7 @@ using Dates: Dates, Date, DateTime, Millisecond
 using Logging: Logging, with_logger, @logmsg
 using Test
 
-include(joinpath(@__DIR__, "..", "Kestra.jl"))
+include(joinpath(@__DIR__, "..", "src", "Kestra.jl"))
 
 function capture(f)
     mktemp() do path, io

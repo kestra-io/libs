@@ -446,6 +446,9 @@ jobs:
         # Two threads, so the test that writes from several threads runs them in parallel.
         run: julia --threads 2 test/runtests.jl
 
+      - name: Load as a package
+        run: julia --project=. -e 'using Kestra; Kestra.outputs(loaded = true)'
+
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest

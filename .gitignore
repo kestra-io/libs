@@ -31,3 +31,6 @@ r/.Rhistory
 ### Groovy
 groovy/build
 groovy/.gradle
+
+### Julia
+julia/Manifest.toml
