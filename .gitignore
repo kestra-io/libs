@@ -27,3 +27,7 @@ dist/
 r/*.Rcheck
 r/*.tar.gz
 r/.Rhistory
+
+### Groovy
+groovy/build
+groovy/.gradle
