@@ -1,7 +1,9 @@
 Package: kestra
 Title: Send Outputs, Metrics, Logs and Assets from R Scripts to 'Kestra'
 Version: 0.0.0
-Authors@R: person("Kestra", email = "hello@kestra.io", role = c("aut", "cre"))
+Authors@R: c(
+    person("Kestra Technologies", role = c("aut", "cph")),
+    person("Ludovic", "Dehon", email = "ldehon@kestra.io", role = "cre"))
 Description: Helpers for R scripts run by 'Kestra' script tasks. Each send call
     prints one '::{...}::' line to stdout, which 'Kestra' reads as task
     outputs, metrics, logs or assets. Also reads the execution context.
