@@ -317,8 +317,12 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: 9.8.2
+
       - name: Build
-        run: ./gradlew --no-daemon jar
+        run: gradle --no-daemon jar
 
       - uses: actions/upload-artifact@v7
         with:
@@ -378,6 +382,10 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: 9.8.2
+
       # Same secrets and signing setup as kestra-io/actions/composite/publish-java. The version comes from the release tag.
       - name: Publish
         env:
@@ -392,7 +400,7 @@ jobs:
           echo "signing.password=${SONATYPE_GPG_PASSWORD}" >> ~/.gradle/gradle.properties
           echo "signing.secretKeyRingFile=${HOME}/.gradle/secring.gpg" >> ~/.gradle/gradle.properties
           echo "${SONATYPE_GPG_FILE}" | base64 -d > ~/.gradle/secring.gpg
-          ./gradlew --no-daemon publishToMavenCentral -Pversion="${GITHUB_REF_NAME#v}"
+          gradle --no-daemon publishToMavenCentral -Pversion="${GITHUB_REF_NAME#v}"
 
   dotnet:
     name: Test .NET library (${{ matrix.sdk }})

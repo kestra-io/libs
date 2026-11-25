@@ -4,6 +4,12 @@ plugins {
     id 'com.vanniktech.maven.publish' version '0.37.0'
 }
 
+group = 'io.kestra'
+// Release builds pass -Pversion from the tag.
+if (version == 'unspecified') {
+    version = '0.0.0-SNAPSHOT'
+}
+
 repositories {
     mavenCentral()
 }
