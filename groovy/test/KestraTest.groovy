@@ -1,4 +1,5 @@
 // Run from the groovy directory: groovy test/KestraTest.groovy
+// To test the built jar instead, run from a directory without Kestra.groovy: KESTRA_CLASSPATH=<jar> groovy -cp <jar> test/KestraTest.groovy
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
@@ -41,7 +42,7 @@ File write(File dir, String name, String content) {
 String run(File dir, Map<String, String> env, String script) {
     File source = write(tempDir(), 'probe.groovy', script)
     String groovy = System.getProperty('os.name').toLowerCase().contains('win') ? 'groovy.bat' : 'groovy'
-    ProcessBuilder builder = new ProcessBuilder(groovy, '-cp', new File('.').canonicalPath, source.path).directory(dir).redirectErrorStream(true)
+    ProcessBuilder builder = new ProcessBuilder(groovy, '-cp', System.getenv('KESTRA_CLASSPATH') ?: new File('.').canonicalPath, source.path).directory(dir).redirectErrorStream(true)
     builder.environment().remove('KESTRA_CONTEXT')
     builder.environment().remove('KESTRA_EXECUTION_CONTEXT_FILE')
     builder.environment().putAll(env)

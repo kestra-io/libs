@@ -4,7 +4,14 @@ Send outputs, metrics, logs and assets from Groovy script tasks to Kestra, and r
 
 ## Install
 
-The class is not on Maven Central yet. Download `Kestra.groovy` into the working directory in `beforeCommands`, where `groovy` finds it:
+From 2.1.0, the class is on Maven Central as `io.kestra:libs-groovy`, compiled for Groovy 3 and later. Grab it at the top of the script:
+
+```groovy
+@Grab('io.kestra:libs-groovy:2.1.0')
+import Kestra
+```
+
+Or download `Kestra.groovy` into the working directory in `beforeCommands`, where `groovy` finds it:
 
 ```bash
 curl -fsSLo Kestra.groovy https://raw.githubusercontent.com/kestra-io/libs/main/groovy/Kestra.groovy

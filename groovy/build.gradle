@@ -1,0 +1,61 @@
+plugins {
+    id 'groovy'
+    id 'signing'
+    id 'com.vanniktech.maven.publish' version '0.37.0'
+}
+
+group = 'io.kestra'
+// Release builds pass -Pversion from the tag.
+if (version == 'unspecified') {
+    version = '0.0.0-SNAPSHOT'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Compiled against the oldest supported Groovy and not shipped: the script task brings its own Groovy, 3 or later.
+    compileOnly 'org.codehaus.groovy:groovy:3.0.25'
+    compileOnly 'org.codehaus.groovy:groovy-json:3.0.25'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+// Kestra.groovy stays at the root of groovy/, so the raw download URL in the README keeps working.
+sourceSets.main.groovy {
+    srcDirs = ['.']
+    include 'Kestra.groovy'
+}
+
+mavenPublishing {
+    publishToMavenCentral(true)
+    signAllPublications()
+    coordinates(project.group.toString(), 'libs-groovy', project.version.toString())
+
+    pom {
+        name = 'libs-groovy'
+        description = 'Send outputs, metrics, logs and assets from Groovy script tasks to Kestra.'
+        url = 'https://github.com/kestra-io/libs'
+        licenses {
+            license {
+                name = 'The Apache License, Version 2.0'
+                url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+            }
+        }
+        developers {
+            developer {
+                id = 'kestra'
+                name = 'Kestra'
+                url = 'https://kestra.io'
+            }
+        }
+        scm {
+            connection = 'scm:git:https://github.com/kestra-io/libs.git'
+            url = 'https://github.com/kestra-io/libs'
+        }
+    }
+}
