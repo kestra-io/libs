@@ -4,11 +4,11 @@ Send outputs, metrics, logs and assets from Julia script tasks to Kestra, and re
 
 ## Install
 
-From 2.1.0, the module is in the General registry. Add it in `beforeCommands` and load it with `using Kestra`:
+From 2.0.0, the module is in the General registry. Add it in `beforeCommands` and load it with `using Kestra`:
 
 ```yaml
 beforeCommands:
-  - julia -e 'using Pkg; Pkg.add(name = "Kestra", version = "2.1.0")'
+  - julia -e 'using Pkg; Pkg.add(name = "Kestra", version = "2.0.0")'
 ```
 
 Or download `src/Kestra.jl` with a Kestra task, pass it to the script in `inputFiles` and `include` it, as in the flow below. Pin a release tag instead of `main` in production flows, so a push to `main` cannot change what runs.
